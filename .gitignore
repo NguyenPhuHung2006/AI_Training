@@ -12,7 +12,7 @@ data/
 outputs/
 
 # Coursera / downloaded content
-coursera/
+material/
 
 # VS Code
 .vscode/
