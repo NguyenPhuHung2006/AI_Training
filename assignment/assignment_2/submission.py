@@ -1,4 +1,11 @@
 def act(observation, configuration):
+    n_rows = configuration.rows
+    n_cols = configuration.columns
+    inarow = configuration.inarow
     board = observation.board
-    columns = configuration.columns
-    return [c for c in range(columns) if board[c] == 0][0]
+    mark = observation.mark
+    
+    
+    
+                
+    
