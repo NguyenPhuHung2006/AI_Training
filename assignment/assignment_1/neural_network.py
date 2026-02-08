@@ -98,7 +98,7 @@ def apply_preprocess(df, stats, normalized):
 class Cost(ABC):
 
     @abstractmethod
-    def compute(self, y_pred, y):
+    def compute_cost(self, y_pred, y):
         pass
 
     @abstractmethod
@@ -107,7 +107,7 @@ class Cost(ABC):
 
 
 class MSE(Cost):
-    def compute(self, y_pred, y):
+    def compute_cost(self, y_pred, y):
         return np.mean((y_pred - y) ** 2) / 2
 
     def derivative(self, y_pred, y):
@@ -115,7 +115,7 @@ class MSE(Cost):
 
 
 class BinaryCrossEntropy(Cost):
-    def compute(self, y_pred, y):
+    def compute_cost(self, y_pred, y):
         eps = 1e-8
         y_pred = np.clip(y_pred, eps, 1 - eps)
         return -np.mean(
@@ -127,7 +127,10 @@ class BinaryCrossEntropy(Cost):
         eps = 1e-8
         y_pred = np.clip(y_pred, eps, 1 - eps)
         return -(y / y_pred) + ((1 - y) / (1 - y_pred))
-
+    
+    def compute_accuracy(self, y_pred, y, threshold=0.5):
+        preds = (y_pred > threshold).astype(int)
+        return np.mean(preds == y)
 
 # =========================
 # Activations
@@ -244,19 +247,14 @@ class NN:
 
         return A
 
-    # accuracy metric
-    def accuracy(self, y_pred, y, threshold=0.5):
-        preds = (y_pred > threshold).astype(int)
-        return np.mean(preds == y)
-
     # evaluation helper
     def evaluate(self, X, y):
         y_pred = self.predict(X, store=False)
-        loss = self.cost_function.compute(y_pred, y)
+        loss = self.cost_function.compute_cost(y_pred, y)
 
         acc = None
         if isinstance(self.cost_function, BinaryCrossEntropy):
-            acc = self.accuracy(y_pred, y)
+            acc = self.cost_function.compute_accuracy(y_pred, y)
 
         return loss, acc
 
@@ -292,13 +290,13 @@ class NN:
                 
                 msg = [f"{i} |"]
                 
-                loss = self.cost_function.compute(y_pred, y)
+                loss = self.cost_function.compute_cost(y_pred, y)
                 
                 if print_cost:
                     msg.append(f" loss:{loss:.4f}")
 
                 if print_accuracy and isinstance(self.cost_function, BinaryCrossEntropy):
-                    acc = self.accuracy(y_pred, y)
+                    acc = self.cost_function.compute_accuracy(y_pred, y)
                     msg.append(f" acc:{acc * 100:.2f}%")
 
                 print(''.join(msg))
@@ -334,7 +332,7 @@ class NN:
                 if print_cost:
                     msg.append(f"cost -> train:{train_loss:.4f}, validation:{val_loss:.4f}")
                     
-                if print_accuracy and isinstance(self.cost_function, BinaryCrossEntropy):
+                if print_accuracy and train_acc and val_acc:
                     msg.append(f"acc -> train:{train_acc * 100:.2f}, validation:{val_acc * 100:.2f}")
 
                 print(''.join(msg))
