@@ -284,31 +284,165 @@ def get_columns(board):
         else:
             illegal_cols.append(i)
     return np.array(valid_cols, dtype=int), np.array(illegal_cols, dtype=int)
-                          
-model = None
-def act(observation, configuration):
+
+def drop_piece(board, action, mark):
+    n_rows = len(board)
+    for i in range(n_rows):
+        if i + 1 >= n_rows or (i + 1 < n_rows and board[i + 1, action] != 0):
+            board[i, action] = mark
+            return
         
-    n_rows = configuration.rows
-    n_cols = configuration.columns
+def check_full(board):
+    n_rows = len(board)
+    n_cols = len(board[0])
+    for i in range(n_rows):
+        for j in range(n_cols):
+            if board[i, j] == 0:
+                return False
+    return True
+
+def check_win(board, mark, inarow):
+    rows = len(board)
+    cols = len(board[0])
+
+    directions = [
+        (0, 1),   # horizontal →
+        (1, 0),   # vertical ↓
+        (1, 1),   # diagonal ↘
+        (1, -1)   # diagonal ↙
+    ]
+
+    for r in range(rows):
+        for c in range(cols):
+            if board[r, c] != mark:
+                continue
+
+            for dr, dc in directions:
+                count = 0
+                rr, cc = r, c
+
+                while (
+                    0 <= rr < rows and
+                    0 <= cc < cols and
+                    board[rr, cc] == mark
+                ):
+                    count += 1
+                    if count == inarow:
+                        return True
+                    rr += dr
+                    cc += dc
+
+    return False
+        
+def execute_action(board, agent_action, inarow, AGENT, OPPONENT, win=1, lose=-1, draw=0, step=0):
+    
+    drop_piece(board, agent_action, AGENT)
+    
+    if check_win(board, AGENT, inarow):
+        return win, True
+    if check_full(board):
+        return draw, True
+    
+    valid_cols, _ = get_columns(board)
+    
+    opponent_action = np.random.choice(valid_cols)
+    
+    drop_piece(board, opponent_action, OPPONENT)
+    
+    if check_win(board, OPPONENT, inarow):
+        return lose, True
+
+    return step, False
+
+def main():
+    
+    # constants
+    n_rows = 6
+    n_cols = 7
+    inarow = 4
+    
     AGENT = 1
     OPPONENT = -1    
+    n_episodes = 50
+    max_steps_per_episode = n_rows * n_cols
     
-    global model
-    if model is None:
-        model = NN(n_rows * n_cols, MSE())
-        model.add_layer(128, Relu())
-        model.add_layer(128, Relu())
-        model.add_layer(n_cols, Linear())
-        model.load("model.npz")
+    epsilon = 1.0
+    epsilon_min = 0.1
+    epsilon_decay = 0.995
+
+    epsilon_greedy = 0.2
+    gamma = 0.9
+    WIN, LOSE, DRAW, STEP = 1, -1, 0, -0.01
+    
+    model = NN(n_rows * n_cols, MSE())
+    model.add_layer(30, Relu())
+    model.add_layer(30, Relu())
+    model.add_layer(n_cols, Linear())
+    
+    empty_board = np.zeros((n_rows, n_cols), dtype=int)
+    
+    for i in range(n_episodes):
         
-    board = observation.board
-    board = normalize_board(board, observation.mark, n_rows, n_cols, AGENT, OPPONENT)
-    s = board.reshape(-1, 1)
-    Q_values = model.predict(s)
-    _, illegal_cols = get_columns(board)
-    Q_values[illegal_cols] = -np.inf
-    return int(np.argmax(Q_values[:, 0]))
-
-
+        if i % 5 == 0:
+            print(i)
+        
+        epsilon = max(epsilon_min, epsilon * epsilon_decay)
+        
+        new_board = empty_board.copy()
                 
+        train_examples = []
+        
+        for i in range(max_steps_per_episode):
+        
+            valid_cols, illegal_cols = get_columns(new_board)
+            agent_action = None
+                        
+            if len(valid_cols) == 0:
+                break
+            
+            s = new_board.reshape(-1, 1)
+            if np.random.rand() < epsilon_greedy:
+                agent_action = np.random.choice(valid_cols)
+            else:
+                Q = model.predict(s, store=False).copy()
+                Q[illegal_cols] = -np.inf
+                agent_action = np.argmax(Q[:, 0])
+                        
+            r, is_done = execute_action(new_board, agent_action, inarow, 
+                                        AGENT, OPPONENT, 
+                                        win=WIN, lose=LOSE, draw=DRAW, step=STEP)
+            
+            new_s = new_board.reshape(-1, 1)
+            _, new_illegal_cols = get_columns(new_board)
+            train_examples.append((s, agent_action, r, new_s, new_illegal_cols, is_done))
+            
+            if is_done:
+                break
+        
+        X, y = [], []
+        for s, agent_action, r, new_s, new_illegal_cols, is_done in train_examples:
+            target = None
+            if is_done:
+                target = r
+            else:
+                Q_rhs = model.predict(new_s, store=False)
+                Q_rhs[new_illegal_cols] = -np.inf
+                target = r + gamma * np.max(Q_rhs[:, 0])
+            
+            Q_values = model.predict(s, store=False)
+            Q_values[agent_action, 0] = target
+            
+            X.append(s)
+            y.append(Q_values)
+            
+        X = np.hstack(X)
+        y = np.hstack(y)
+        
+        model.fit(X, y)
+        
+    model.save("model.npz")
     
+
+if __name__ == "__main__":
+    main()
+    print("completed")

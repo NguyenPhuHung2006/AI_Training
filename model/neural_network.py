@@ -247,3 +247,21 @@ class NN:
                     msg.append(f"acc -> train:{train_acc * 100:.2f}, validation:{val_acc * 100:.2f}")
 
                 print(''.join(msg))
+                
+    def save(self, filename):
+        params = {}
+
+        for i, layer in enumerate(self.layers):
+            params[f"W{i}"] = layer.W
+            params[f"b{i}"] = layer.b
+
+        np.savez(filename, **params)
+        
+    def load(self, filename):
+        data = np.load(filename)
+
+        for i, layer in enumerate(self.layers):
+            layer.W = data[f"W{i}"]
+            layer.b = data[f"b{i}"]
+
+
