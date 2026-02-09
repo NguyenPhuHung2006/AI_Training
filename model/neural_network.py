@@ -2,7 +2,71 @@ import numpy as np
 from abc import ABC, abstractmethod
 from sklearn.model_selection import train_test_split
 
+# =========================
+# Activations
+# =========================
+class Activation(ABC):
 
+    @abstractmethod
+    def compute(self, z):
+        pass
+    
+    @abstractmethod
+    def derivative_from_a(self, a):
+        pass
+    
+    @abstractmethod
+    def derivative_from_z(self, z):
+        pass
+
+
+class Sigmoid(Activation):
+    def compute(self, z):
+        z = np.clip(z, -500, 500)
+        return 1 / (1 + np.exp(-z))
+    
+    def derivative_from_a(self, a):
+        return a * (1 - a)
+
+    def derivative_from_z(self, z):
+        s = self.compute(z)
+        return self.derivative_from_a(s)
+
+
+class Linear(Activation):
+    def compute(self, z):
+        return z
+    
+    def derivative_from_a(self, a):
+        return np.ones_like(a)
+    
+    def derivative_from_z(self, z):
+        return np.ones_like(z)
+
+
+class Tanh(Activation):
+    def compute(self, z):
+        z = np.clip(z, -500, 500)
+        return np.tanh(z)
+    
+    def derivative_from_a(self, a):
+        return 1 - a**2
+    
+    def derivative_from_z(self, z):
+        t = self.compute(z)
+        return self.derivative_from_a(t)
+
+
+class Relu(Activation):
+    def compute(self, z):
+        return np.maximum(z, 0)
+    
+    def derivative_from_a(self, a):
+        return (a > 0).astype(float)
+    
+    def derivative_from_z(self, z):
+        return (z > 0).astype(float)
+    
 # =========================
 # Cost functions
 # =========================
@@ -13,7 +77,11 @@ class Cost(ABC):
         pass
 
     @abstractmethod
-    def derivative(self, y_pred, y):
+    def compute_dA(self, y_pred, y):
+        pass
+    
+    @abstractmethod
+    def output_dZ(self, dA, Y, layer):
         pass
 
 
@@ -21,8 +89,11 @@ class MSE(Cost):
     def compute_cost(self, y_pred, y):
         return np.mean((y_pred - y) ** 2) / 2
 
-    def derivative(self, y_pred, y):
+    def compute_dA(self, y_pred, y):
         return (y_pred - y)
+    
+    def output_dZ(self, dA, Y, layer):
+        return dA * layer.activation.derivative_from_a(layer.A)
 
 
 class BinaryCrossEntropy(Cost):
@@ -34,64 +105,22 @@ class BinaryCrossEntropy(Cost):
             (1 - y) * np.log(1 - y_pred)
         )
 
-    def derivative(self, y_pred, y):
+    def compute_dA(self, y_pred, y):
         eps = 1e-8
         y_pred = np.clip(y_pred, eps, 1 - eps)
         return -(y / y_pred) + ((1 - y) / (1 - y_pred))
     
+    def output_dZ(self, dA, Y, layer):
+        activation = layer.activation
+        
+        if isinstance(activation, Sigmoid):
+            return layer.A - Y
+
+        return dA * activation.derivative_from_a(layer.A)
+    
     def compute_accuracy(self, y_pred, y, threshold=0.5):
         preds = (y_pred > threshold).astype(int)
         return np.mean(preds == y)
-
-# =========================
-# Activations
-# =========================
-class Activation(ABC):
-
-    @abstractmethod
-    def compute(self, z):
-        pass
-
-    @abstractmethod
-    def compute_derivative(self, z):
-        pass
-
-
-class Sigmoid(Activation):
-    def compute(self, z):
-        z = np.clip(z, -500, 500)
-        return 1 / (1 + np.exp(-z))
-
-    def compute_derivative(self, z):
-        s = self.compute(z)
-        return s * (1 - s)
-
-
-class Linear(Activation):
-    def compute(self, z):
-        return z
-
-    def compute_derivative(self, z):
-        return np.ones_like(z)
-
-
-class Tanh(Activation):
-    def compute(self, z):
-        z = np.clip(z, -500, 500)
-        return np.tanh(z)
-
-    def compute_derivative(self, z):
-        t = self.compute(z)
-        return 1 - t**2
-
-
-class Relu(Activation):
-    def compute(self, z):
-        return np.maximum(z, 0)
-
-    def compute_derivative(self, z):
-        return (z > 0).astype(float)
-
 
 # =========================
 # Layer
@@ -127,6 +156,22 @@ class Layer:
             self.A = A
 
         return A
+    
+    def backward(self, dA, Y, cost_function, lr, m, is_output):     
+        dZ = None
+        if is_output:
+            dZ = cost_function.output_dZ(dA, Y, self)
+        else:
+            dZ = dA * self.activation.derivative_from_a(self.A)
+           
+        dW = (dZ @ self.input.T) / m
+        db = np.sum(dZ, axis=1, keepdims=True) / m
+        dA = self.W.T @ dZ
+
+        self.W -= lr * dW
+        self.b -= lr * db
+        
+        return dA
 
 
 # =========================
@@ -157,6 +202,15 @@ class NN:
             A = layer.forward(A, store)
 
         return A
+    
+    # backward pass
+    def backward(self, y_pred, y, lr):
+        m = y.shape[1]
+        dA = self.cost_function.compute_dA(y_pred, y)
+
+        for i, layer in enumerate(reversed(self.layers)):
+            is_output = (i == 0)
+            dA = layer.backward(dA, y, self.cost_function, lr, m, is_output)
 
     # evaluation helper
     def evaluate(self, X, y):
@@ -169,21 +223,6 @@ class NN:
 
         return loss, acc
 
-
-    # backward pass
-    def _backward(self, y_pred, y, lr):
-        m = y.shape[1]
-        dA = self.cost_function.derivative(y_pred, y)
-
-        for layer in reversed(self.layers):
-            dZ = dA * layer.activation.compute_derivative(layer.Z)
-            dW = (dZ @ layer.input.T) / m
-            db = np.sum(dZ, axis=1, keepdims=True) / m
-            dA = layer.W.T @ dZ
-
-            layer.W -= lr * dW
-            layer.b -= lr * db
-
     # training
     def fit(self, X, y, n_iterations=10000, lr=0.01,
             print_cost=False, print_accuracy=False):
@@ -195,7 +234,7 @@ class NN:
 
         for i in range(n_iterations):
             y_pred = self.predict(X, store=True)
-            self._backward(y_pred, y, lr)
+            self.backward(y_pred, y, lr)
 
             if i % print_every == 0 and (print_cost or print_accuracy):
                 
@@ -232,7 +271,7 @@ class NN:
 
         for i in range(n_iterations):
             y_pred = self.predict(X_train, store=True)
-            self._backward(y_pred, y_train, lr)
+            self.backward(y_pred, y_train, lr)
 
             if i % print_every == 0 and (print_cost or print_accuracy):
                 train_loss, train_acc = self.evaluate(X_train, y_train)
@@ -243,7 +282,7 @@ class NN:
                 if print_cost:
                     msg.append(f"cost -> train:{train_loss:.4f}, validation:{val_loss:.4f}")
                     
-                if print_accuracy and train_acc and val_acc:
+                if print_accuracy and train_acc is not None and val_acc is not None:
                     msg.append(f"acc -> train:{train_acc * 100:.2f}, validation:{val_acc * 100:.2f}")
 
                 print(''.join(msg))
@@ -263,5 +302,3 @@ class NN:
         for i, layer in enumerate(self.layers):
             layer.W = data[f"W{i}"]
             layer.b = data[f"b{i}"]
-
-
