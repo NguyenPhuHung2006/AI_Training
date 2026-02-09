@@ -363,82 +363,81 @@ def main():
     
     AGENT = 1
     OPPONENT = -1    
-    n_episodes = 50
+    n_episodes = 2000
     max_steps_per_episode = n_rows * n_cols
     
     epsilon = 1.0
     epsilon_min = 0.1
     epsilon_decay = 0.995
 
-    epsilon_greedy = 0.2
     gamma = 0.9
     WIN, LOSE, DRAW, STEP = 1, -1, 0, -0.01
     
     model = NN(n_rows * n_cols, MSE())
-    model.add_layer(30, Relu())
-    model.add_layer(30, Relu())
+    model.add_layer(128, Relu())
+    model.add_layer(128, Relu())
     model.add_layer(n_cols, Linear())
     
     empty_board = np.zeros((n_rows, n_cols), dtype=int)
     
-    for i in range(n_episodes):
+    for episode in range(n_episodes):
         
-        if i % 5 == 0:
-            print(i)
+        if episode % 5 == 0:
+            print(episode)
         
         epsilon = max(epsilon_min, epsilon * epsilon_decay)
         
-        new_board = empty_board.copy()
+        board = empty_board.copy()
                 
-        train_examples = []
+        X, y = [], []
+        for step in range(max_steps_per_episode):
         
-        for i in range(max_steps_per_episode):
-        
-            valid_cols, illegal_cols = get_columns(new_board)
+            valid_cols, illegal_cols = get_columns(board)
             agent_action = None
                         
             if len(valid_cols) == 0:
                 break
             
-            s = new_board.reshape(-1, 1)
-            if np.random.rand() < epsilon_greedy:
+            s = board.reshape(-1, 1)
+            Q_values = model.predict(s, store=False)
+            
+            # find 'a' such that Q(s, a) is the largest -> (agent_action = a)
+            if np.random.rand() < epsilon:
                 agent_action = np.random.choice(valid_cols)
             else:
-                Q = model.predict(s, store=False).copy()
+                Q = Q_values.copy()
                 Q[illegal_cols] = -np.inf
                 agent_action = np.argmax(Q[:, 0])
                         
-            r, is_done = execute_action(new_board, agent_action, inarow, 
+            r, is_done = execute_action(board, agent_action, inarow, 
                                         AGENT, OPPONENT, 
                                         win=WIN, lose=LOSE, draw=DRAW, step=STEP)
             
-            new_s = new_board.reshape(-1, 1)
-            _, new_illegal_cols = get_columns(new_board)
-            train_examples.append((s, agent_action, r, new_s, new_illegal_cols, is_done))
-            
-            if is_done:
-                break
+            new_s = board.reshape(-1, 1)
         
-        X, y = [], []
-        for s, agent_action, r, new_s, new_illegal_cols, is_done in train_examples:
+            # y[a] = R(s, a) + gamma * max(Q(s', a')), y[other] is unchanged  
             target = None
             if is_done:
                 target = r
             else:
                 Q_rhs = model.predict(new_s, store=False)
+                _, new_illegal_cols = get_columns(board)
                 Q_rhs[new_illegal_cols] = -np.inf
                 target = r + gamma * np.max(Q_rhs[:, 0])
             
-            Q_values = model.predict(s, store=False)
             Q_values[agent_action, 0] = target
             
             X.append(s)
             y.append(Q_values)
             
-        X = np.hstack(X)
-        y = np.hstack(y)
-        
-        model.fit(X, y)
+            if is_done:
+                break
+            
+        # X = y -> (X = Q(s, a), y = R(s, a) + gamma * max(Q(s', a')))
+        if X:
+            X = np.hstack(X)
+            y = np.hstack(y)
+            model.fit(X, y)
         
     model.save("model.npz")
     
