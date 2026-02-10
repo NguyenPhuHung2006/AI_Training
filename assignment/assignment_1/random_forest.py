@@ -16,10 +16,19 @@ def split_cabin_column(df):
     return df
 
 
-def fillna_cat_column(df, cat_cols):
+def fillna_cat_cols(df, cat_cols):
     df = df.copy()
     df[cat_cols] = df[cat_cols].fillna("Unknown")
-    df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
+    df = pd.get_dummies(df, columns=cat_cols, drop_first=False)
+    return df
+
+def fillna_spend_cols(df, spend_cols):
+    df = df.copy()
+    
+    cryo_mask = df["CryoSleep"] == True
+    df.loc[cryo_mask, spend_cols] = df.loc[cryo_mask, spend_cols].fillna(0)
+    
+    df[spend_cols] = df[spend_cols].fillna(0)
     return df
 
 def add_total_spend_cols(df):
@@ -32,6 +41,25 @@ def add_total_spend_cols(df):
         + df["VRDeck"]
     )
     df["NoSpend"] = (df["TotalSpend"] == 0).astype(int)
+    df["LogTotalSpend"] = np.log1p(df["TotalSpend"])
+    return df
+
+def add_group_features(df):
+    df["IsAlone"] = (df["GroupSize"] == 1).astype(int)
+    
+    df["GroupSizeBin"] = pd.cut(
+        df["GroupSize"],
+        bins=[0,1,3,6,20],
+        labels=False
+    )
+
+    group_id = df["Group"]
+
+    df["GroupTotalSpend"] = df.groupby(group_id)["TotalSpend"].transform("sum")
+    df["GroupMeanSpend"] = df.groupby(group_id)["TotalSpend"].transform("mean")
+    
+    df = df.drop(columns=["Group"])
+
     return df
 
 def extract_group(df_train, df_test):
@@ -44,58 +72,131 @@ def extract_group(df_train, df_test):
 
     df_train["GroupSize"] = df_train["Group"].map(group_sizes).fillna(median_size)
     df_test["GroupSize"] = df_test["Group"].map(group_sizes).fillna(median_size)
-
-    df_train = df_train.drop(columns=["Group"])
-    df_test = df_test.drop(columns=["Group"])
+    
+    df_train = add_group_features(df_train)
+    df_test = add_group_features(df_test)
     
     return df_train, df_test
 
-def add_cabin_position(df):
+def add_cabin_position(df_train, df_test):
+    df_train, df_test = df_train.copy(), df_test.copy()
+    max_cabin = max(df_train["CabinNum"].max(), df_test["CabinNum"].max())
+    df_train["CabinPos"] = df_train["CabinNum"] / max_cabin
+    df_test["CabinPos"] = df_test["CabinNum"] / max_cabin
+    return df_train, df_test
+
+def add_cabin_zone(df):
     df = df.copy()
-    max_cabin = df["CabinNum"].max()
-    df["CabinPos"] = df["CabinNum"] / max_cabin
+    df["CabinZone"] = pd.cut(
+        df["CabinPos"],
+        bins=[0, 0.33, 0.66, 1.0],
+        labels=False
+    )
+    df["CabinZone"] = df["CabinZone"].fillna(-1)
+    return df
+
+def add_age_bin(df):
+    df = df.copy()
+    df["AgeBin"] = pd.cut(df["Age"], bins=[0,12,18,30,50,100], labels=False)
+    df["AgeBin"] = df["AgeBin"].fillna(-1)
+    return df
+
+def add_spend_per_person(df):
+    df = df.copy()
+    df["SpendPerPerson"] = df["TotalSpend"] / df["GroupSize"]
+    return df
+
+def add_child(df):
+    df = df.copy()
+    df["Child"] = (df["Age"] < 13).astype(int)
+    return df
+
+def add_bin_spend_cols(df):
+    df = df.copy()
+    df["HasRoomService"] = (df["RoomService"] > 0).astype(int)
+    df["HasSpa"] = (df["Spa"] > 0).astype(int)
+    df["HasVRDeck"] = (df["VRDeck"] > 0).astype(int)
+    return df
+
+def add_route(df):
+    df = df.copy()
+    df["Route"] = df["HomePlanet"] + "_" + df["Destination"]
+    return df
+
+def add_age_missing(df):
+    df = df.copy()
+    df["AgeMissing"] = df["Age"].isna().astype(int)
+    return df
+
+def add_vip_nospend(df):
+    df = df.copy()
+    df["VIP_NoSpend"] = df["VIP_True"] * df["NoSpend"]
     return df
 
 def read_data(train_path, test_path):
     df_train = pd.read_csv(train_path)
     df_test = pd.read_csv(test_path)
+
+    # spend columns
+    spend_cols = ["RoomService","FoodCourt","ShoppingMall","Spa","VRDeck"]
+    df_train = fillna_spend_cols(df_train, spend_cols)
+    df_test = fillna_spend_cols(df_test, spend_cols)
     
-    df_train, df_test = extract_group(df_train, df_test)
-
-    passenger_id = df_test["PassengerId"]
-
-    # drop unnecessary columns
-    drop_cols = ["PassengerId", "Name"]
-    df_train = df_train.drop(columns=drop_cols)
-    df_test = df_test.drop(columns=drop_cols)
-
+    df_train = add_route(df_train)
+    df_test = add_route(df_test)
+    
     # split cabin column
     df_train = split_cabin_column(df_train)
     df_test = split_cabin_column(df_test)
-
+    
     # categorical columns
-    cat_cols = ["CryoSleep", "VIP", "HomePlanet", "Destination", "Deck", "Side"]
-    df_train = fillna_cat_column(df_train, cat_cols)
-    df_test = fillna_cat_column(df_test, cat_cols)
-
-    spend_cols = ["RoomService","FoodCourt","ShoppingMall","Spa","VRDeck"]
-    df_train[spend_cols] = df_train[spend_cols].fillna(0)
-    df_test[spend_cols] = df_test[spend_cols].fillna(0)
+    cat_cols = ["CryoSleep", "VIP", "HomePlanet", "Destination", "Deck", "Side", "Route"]
+    df_concat = pd.concat([df_train, df_test], axis=0)
+    df_concat = fillna_cat_cols(df_concat, cat_cols)
+    df_train = df_concat.iloc[:len(df_train)]
+    df_test = df_concat.iloc[len(df_train):]
+    
+    df_train = add_age_missing(df_train)
+    df_test = add_age_missing(df_test)
 
     other_cols = ["Age","CabinNum"]
     medians = df_train[other_cols].median()
     df_train[other_cols] = df_train[other_cols].fillna(medians)
     df_test[other_cols] = df_test[other_cols].fillna(medians)
     
-    df_train = add_cabin_position(df_train)
-    df_test = add_cabin_position(df_test)
+    df_train = add_age_bin(df_train)
+    df_test = add_age_bin(df_test)
+    
+    df_train, df_test = add_cabin_position(df_train, df_test)
+    df_train = add_cabin_zone(df_train)
+    df_test = add_cabin_zone(df_test)
     
     df_train = add_total_spend_cols(df_train)
     df_test = add_total_spend_cols(df_test)
+    
+    df_train, df_test = extract_group(df_train, df_test)
+    
+    df_train = add_vip_nospend(df_train)
+    df_test = add_vip_nospend(df_test)
+    
+    df_train = add_spend_per_person(df_train)
+    df_test = add_spend_per_person(df_test)
+    
+    df_train = add_child(df_train)
+    df_test = add_child(df_test)
+    
+    df_train = add_bin_spend_cols(df_train)
+    df_test = add_bin_spend_cols(df_test)
 
     y_train = df_train["Transported"].to_numpy().astype(int)
     df_train = df_train.drop(columns="Transported")
-
+    
+    passenger_id = df_test["PassengerId"]
+    # drop unnecessary columns
+    drop_cols = ["PassengerId", "Name"]
+    df_train = df_train.drop(columns=drop_cols)
+    df_test = df_test.drop(columns=drop_cols)
+    
     common_cols = df_train.columns.intersection(df_test.columns)
     df_train = df_train[common_cols]
     df_test = df_test[common_cols]
@@ -293,11 +394,11 @@ def main():
     info = {
         "max_depth": 10,
         "min_samples": 5,
-        "n_trees": 300
+        "n_trees": 500
     }
 
-    # get_result(X_train, y_train, X_test, passenger_id, info)
-    get_validation(X_train, y_train, info)
+    get_result(X_train, y_train, X_test, passenger_id, info)
+    # get_validation(X_train, y_train, info)
 
 
 if __name__ == "__main__":
