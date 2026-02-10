@@ -22,210 +22,39 @@ def fillna_cat_cols(df, cat_cols):
     df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
     return df
 
-def fillna_spend_cols(df, spend_cols):
-    df = df.copy()
-    
-    cryo_mask = df["CryoSleep"] == True
-    df.loc[cryo_mask, spend_cols] = df.loc[cryo_mask, spend_cols].fillna(0)
-    
-    df[spend_cols] = df[spend_cols].fillna(0)
-    return df
-
-def add_total_spend_cols(df):
-    df = df.copy()
-    df["TotalSpend"] = (
-        df["RoomService"]
-        + df["FoodCourt"]
-        + df["ShoppingMall"]
-        + df["Spa"]
-        + df["VRDeck"]
-    )
-    df["NoSpend"] = (df["TotalSpend"] == 0).astype(int)
-    df["LogTotalSpend"] = np.log1p(df["TotalSpend"])
-    return df
-
-def add_group_features(df):
-    df["IsAlone"] = (df["GroupSize"] == 1).astype(int)
-    
-    df["GroupSizeBin"] = pd.cut(
-        df["GroupSize"],
-        bins=[0,1,3,6,20],
-        labels=False
-    )
-
-    group_id = df["Group"]
-
-    df["GroupTotalSpend"] = df.groupby(group_id)["TotalSpend"].transform("sum")
-    df["GroupMeanSpend"] = df.groupby(group_id)["TotalSpend"].transform("mean")
-    
-    df = df.drop(columns=["Group"])
-
-    return df
-
-def extract_group(df_train, df_test):
-    df_train, df_test = df_train.copy(), df_test.copy()
-    df_train["Group"] = df_train["PassengerId"].str.split("_").str[0]
-    df_test["Group"] = df_test["PassengerId"].str.split("_").str[0]
-
-    group_sizes = df_train["Group"].value_counts()
-    median_size = group_sizes.median()
-
-    df_train["GroupSize"] = df_train["Group"].map(group_sizes).fillna(median_size)
-    df_test["GroupSize"] = df_test["Group"].map(group_sizes).fillna(median_size)
-    
-    df_train = add_group_features(df_train)
-    df_test = add_group_features(df_test)
-    
-    return df_train, df_test
-
-def add_cabin_position(df_train, df_test):
-    df_train, df_test = df_train.copy(), df_test.copy()
-    max_cabin = max(df_train["CabinNum"].max(), df_test["CabinNum"].max())
-    df_train["CabinPos"] = df_train["CabinNum"] / max_cabin
-    df_test["CabinPos"] = df_test["CabinNum"] / max_cabin
-    return df_train, df_test
-
-def add_cabin_zone(df):
-    df = df.copy()
-    df["CabinZone"] = pd.cut(
-        df["CabinPos"],
-        bins=[0, 0.33, 0.66, 1.0],
-        labels=False
-    )
-    df["CabinZone"] = df["CabinZone"].fillna(-1)
-    return df
-
-def add_age_bin(df):
-    df = df.copy()
-    df["AgeBin"] = pd.cut(df["Age"], bins=[0,12,18,30,50,100], labels=False)
-    df["AgeBin"] = df["AgeBin"].fillna(-1)
-    return df
-
-def add_spend_per_person(df):
-    df = df.copy()
-    df["SpendPerPerson"] = np.log1p(df["TotalSpend"] / df["GroupSize"])
-    return df
-
-def add_child(df):
-    df = df.copy()
-    df["Child"] = (df["Age"] < 13).astype(int)
-    return df
-
-def add_bin_spend_cols(df):
-    df = df.copy()
-    df["HasRoomService"] = (df["RoomService"] > 0).astype(int)
-    df["HasSpa"] = (df["Spa"] > 0).astype(int)
-    df["HasVRDeck"] = (df["VRDeck"] > 0).astype(int)
-    return df
-
-def add_age_missing(df):
-    df = df.copy()
-    df["AgeMissing"] = df["Age"].isna().astype(int)
-    return df
-
-def add_vip_nospend(df):
-    df = df.copy()
-    df["VIP_NoSpend"] = df["VIP_True"] * df["NoSpend"]
-    return df
-
-def add_cryo_nospend(df):
-    df = df.copy()
-    df["Cryo_NoSpend"] = (
-        (df["CryoSleep_True"] == 1) & (df["TotalSpend"] == 0)
-    ).astype(int)
-
-    return df
-
-
-def add_surname_group(df_train, df_test):
-    df_train = df_train.copy()
-    df_test = df_test.copy()
-
-    df_train["Surname"] = df_train["Name"].str.split(",").str[0]
-    df_test["Surname"] = df_test["Name"].str.split(",").str[0]
-
-    surname_counts = df_train["Surname"].value_counts()
-
-    df_train["FamilySize"] = df_train["Surname"].map(surname_counts).fillna(1)
-    df_test["FamilySize"] = df_test["Surname"].map(surname_counts).fillna(1)
-
-    df_train["IsFamily"] = (df_train["FamilySize"] > 1).astype(int)
-    df_test["IsFamily"] = (df_test["FamilySize"] > 1).astype(int)
-    
-    df_train = df_train.drop(columns="Surname")
-    df_test = df_test.drop(columns="Surname")
-
-    return df_train, df_test
-
 def read_data(train_path, test_path):
     df_train = pd.read_csv(train_path)
     df_test = pd.read_csv(test_path)
 
-    # spend columns
-    spend_cols = ["RoomService","FoodCourt","ShoppingMall","Spa","VRDeck"]
-    df_train = fillna_spend_cols(df_train, spend_cols)
-    df_test = fillna_spend_cols(df_test, spend_cols)
-    
+    passenger_id = df_test["PassengerId"]
+
+    # drop unnecessary columns
+    drop_cols = ["PassengerId", "Name"]
+    df_train = df_train.drop(columns=drop_cols)
+    df_test = df_test.drop(columns=drop_cols)
+
     # split cabin column
     df_train = split_cabin_column(df_train)
     df_test = split_cabin_column(df_test)
     
     # categorical columns
     cat_cols = ["CryoSleep", "VIP", "HomePlanet", "Destination", "Deck", "Side"]
-    df_concat = pd.concat([df_train, df_test], axis=0)
-    df_concat = fillna_cat_cols(df_concat, cat_cols)
-    df_train = df_concat.iloc[:len(df_train)]
-    df_test = df_concat.iloc[len(df_train):]
-    
-    df_train = add_age_missing(df_train)
-    df_test = add_age_missing(df_test)
+    df_train = fillna_cat_cols(df_train, cat_cols)
+    df_test = fillna_cat_cols(df_test, cat_cols)
 
-    other_cols = ["Age","CabinNum"]
-    medians = df_train[other_cols].median()
-    df_train[other_cols] = df_train[other_cols].fillna(medians)
-    df_test[other_cols] = df_test[other_cols].fillna(medians)
-    
-    df_train = add_age_bin(df_train)
-    df_test = add_age_bin(df_test)
-    
-    df_train, df_test = add_cabin_position(df_train, df_test)
-    df_train = add_cabin_zone(df_train)
-    df_test = add_cabin_zone(df_test)
-    
-    df_train = add_total_spend_cols(df_train)
-    df_test = add_total_spend_cols(df_test)
-    
-    df_train = add_cryo_nospend(df_train)
-    df_test = add_cryo_nospend(df_test)
-    
-    df_train, df_test = extract_group(df_train, df_test)
-    
-    df_train = add_vip_nospend(df_train)
-    df_test = add_vip_nospend(df_test)
-    
-    df_train = add_spend_per_person(df_train)
-    df_test = add_spend_per_person(df_test)
-    
-    df_train = add_child(df_train)
-    df_test = add_child(df_test)
-    
-    df_train = add_bin_spend_cols(df_train)
-    df_test = add_bin_spend_cols(df_test)
-    
-    df_train, df_test = add_surname_group(df_train, df_test)
+    # numerical columns
+    num_cols = [
+        "RoomService", "FoodCourt", "ShoppingMall",
+        "Spa", "VRDeck", "Age", "CabinNum"
+    ]
+    num_medians = df_train[num_cols].median()
+    df_train[num_cols] = df_train[num_cols].fillna(num_medians)
+    df_test[num_cols] = df_test[num_cols].fillna(num_medians)
 
     y_train = df_train["Transported"].to_numpy().astype(int)
     df_train = df_train.drop(columns="Transported")
-    
-    passenger_id = df_test["PassengerId"]
-    # drop unnecessary columns
-    drop_cols = ["PassengerId", "Name"]
-    df_train = df_train.drop(columns=drop_cols)
-    df_test = df_test.drop(columns=drop_cols)
-    
-    common_cols = df_train.columns.intersection(df_test.columns)
-    df_train = df_train[common_cols]
-    df_test = df_test[common_cols]
+
+    df_train = df_train.reindex(columns=df_test.columns, fill_value=0)
 
     x_train = df_train.to_numpy().astype(float)
     x_test = df_test.to_numpy().astype(float)
@@ -351,18 +180,19 @@ def random_sample(X, y):
 
 
 def random_features_indices(n_features):
-    m = max(3, int(np.sqrt(n_features)))
-    m = min(m, n_features)
+    m = int(np.sqrt(n_features))
     return np.random.choice(n_features, m, replace=False)
+
 
 def build_random_forest(X, y, info):
     forest = []
 
     for i in range(info["n_trees"]):
-        Xb, yb = random_sample(X, y)
         
         if i % 5 == 0:
             print(i)
+        
+        Xb, yb = random_sample(X, y)
 
         tree = build_decision_tree(
             Xb,
@@ -418,13 +248,13 @@ def main():
     )
 
     info = {
-        "max_depth": 16,
-        "min_samples": 2,
-        "n_trees": 400
+        "max_depth": None,
+        "min_samples": 10,
+        "n_trees": 100
     }
 
-    get_result(X_train, y_train, X_test, passenger_id, info)
-    # get_validation(X_train, y_train, info)
+    # get_result(X_train, y_train, X_test, passenger_id, info)
+    get_validation(X_train, y_train, info)
 
 
 if __name__ == "__main__":
