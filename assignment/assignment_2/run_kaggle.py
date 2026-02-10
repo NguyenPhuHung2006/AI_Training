@@ -1,5 +1,5 @@
 from kaggle_environments import make
-from submission import act
+from neural_network.submission import act
 
 env = make("connectx", debug=True)
 env.run(["random", act])

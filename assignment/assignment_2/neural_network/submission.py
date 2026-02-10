@@ -299,7 +299,7 @@ def act(observation, configuration):
         model.add_layer(128, Relu())
         model.add_layer(128, Relu())
         model.add_layer(n_cols, Linear())
-        model.load("model.npz")
+        model.load("neural_network/model.npz")
         
     board = observation.board
     board = normalize_board(board, observation.mark, n_rows, n_cols, AGENT, OPPONENT)
