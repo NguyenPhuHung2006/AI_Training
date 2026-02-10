@@ -19,7 +19,7 @@ def split_cabin_column(df):
 def fillna_cat_cols(df, cat_cols):
     df = df.copy()
     df[cat_cols] = df[cat_cols].fillna("Unknown")
-    df = pd.get_dummies(df, columns=cat_cols, drop_first=False)
+    df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
     return df
 
 def fillna_spend_cols(df, spend_cols):
@@ -103,7 +103,7 @@ def add_age_bin(df):
 
 def add_spend_per_person(df):
     df = df.copy()
-    df["SpendPerPerson"] = df["TotalSpend"] / df["GroupSize"]
+    df["SpendPerPerson"] = np.log1p(df["TotalSpend"] / df["GroupSize"])
     return df
 
 def add_child(df):
@@ -118,11 +118,6 @@ def add_bin_spend_cols(df):
     df["HasVRDeck"] = (df["VRDeck"] > 0).astype(int)
     return df
 
-def add_route(df):
-    df = df.copy()
-    df["Route"] = df["HomePlanet"] + "_" + df["Destination"]
-    return df
-
 def add_age_missing(df):
     df = df.copy()
     df["AgeMissing"] = df["Age"].isna().astype(int)
@@ -133,6 +128,35 @@ def add_vip_nospend(df):
     df["VIP_NoSpend"] = df["VIP_True"] * df["NoSpend"]
     return df
 
+def add_cryo_nospend(df):
+    df = df.copy()
+    df["Cryo_NoSpend"] = (
+        (df["CryoSleep_True"] == 1) & (df["TotalSpend"] == 0)
+    ).astype(int)
+
+    return df
+
+
+def add_surname_group(df_train, df_test):
+    df_train = df_train.copy()
+    df_test = df_test.copy()
+
+    df_train["Surname"] = df_train["Name"].str.split(",").str[0]
+    df_test["Surname"] = df_test["Name"].str.split(",").str[0]
+
+    surname_counts = df_train["Surname"].value_counts()
+
+    df_train["FamilySize"] = df_train["Surname"].map(surname_counts).fillna(1)
+    df_test["FamilySize"] = df_test["Surname"].map(surname_counts).fillna(1)
+
+    df_train["IsFamily"] = (df_train["FamilySize"] > 1).astype(int)
+    df_test["IsFamily"] = (df_test["FamilySize"] > 1).astype(int)
+    
+    df_train = df_train.drop(columns="Surname")
+    df_test = df_test.drop(columns="Surname")
+
+    return df_train, df_test
+
 def read_data(train_path, test_path):
     df_train = pd.read_csv(train_path)
     df_test = pd.read_csv(test_path)
@@ -142,15 +166,12 @@ def read_data(train_path, test_path):
     df_train = fillna_spend_cols(df_train, spend_cols)
     df_test = fillna_spend_cols(df_test, spend_cols)
     
-    df_train = add_route(df_train)
-    df_test = add_route(df_test)
-    
     # split cabin column
     df_train = split_cabin_column(df_train)
     df_test = split_cabin_column(df_test)
     
     # categorical columns
-    cat_cols = ["CryoSleep", "VIP", "HomePlanet", "Destination", "Deck", "Side", "Route"]
+    cat_cols = ["CryoSleep", "VIP", "HomePlanet", "Destination", "Deck", "Side"]
     df_concat = pd.concat([df_train, df_test], axis=0)
     df_concat = fillna_cat_cols(df_concat, cat_cols)
     df_train = df_concat.iloc[:len(df_train)]
@@ -174,6 +195,9 @@ def read_data(train_path, test_path):
     df_train = add_total_spend_cols(df_train)
     df_test = add_total_spend_cols(df_test)
     
+    df_train = add_cryo_nospend(df_train)
+    df_test = add_cryo_nospend(df_test)
+    
     df_train, df_test = extract_group(df_train, df_test)
     
     df_train = add_vip_nospend(df_train)
@@ -187,6 +211,8 @@ def read_data(train_path, test_path):
     
     df_train = add_bin_spend_cols(df_train)
     df_test = add_bin_spend_cols(df_test)
+    
+    df_train, df_test = add_surname_group(df_train, df_test)
 
     y_train = df_train["Transported"].to_numpy().astype(int)
     df_train = df_train.drop(columns="Transported")
@@ -214,15 +240,15 @@ def compute_entropy(p):
 
 
 def compute_score(x, y):
-    thresholds = np.unique(x)
+    thresholds = np.percentile(x, np.linspace(2, 98, 50))
+    thresholds = np.unique(thresholds)
     n_samples = len(y)
 
     best_score = float("inf")
     best_threshold = None
 
-    for i in range(len(thresholds) - 1):
-        threshold = (thresholds[i] + thresholds[i + 1]) / 2
-
+    for threshold in thresholds:
+        
         left = y[x <= threshold]
         right = y[x > threshold]
 
@@ -325,7 +351,7 @@ def random_sample(X, y):
 
 
 def random_features_indices(n_features):
-    m = int(np.sqrt(n_features)) + 2
+    m = max(3, int(np.sqrt(n_features)))
     m = min(m, n_features)
     return np.random.choice(n_features, m, replace=False)
 
@@ -392,9 +418,9 @@ def main():
     )
 
     info = {
-        "max_depth": 10,
-        "min_samples": 5,
-        "n_trees": 500
+        "max_depth": 16,
+        "min_samples": 2,
+        "n_trees": 400
     }
 
     get_result(X_train, y_train, X_test, passenger_id, info)
