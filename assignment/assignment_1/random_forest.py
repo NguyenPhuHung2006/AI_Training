@@ -2,7 +2,8 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from collections import Counter
-
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
 
 def split_cabin_column(df):
     df = df.copy()
@@ -239,6 +240,24 @@ def get_result(X_train, y_train, X_test, passenger_id, info):
     })
 
     df_out.to_csv("outputs/random_forest.csv", index=False)
+    
+def visualize_pca(X, y):
+    pca = PCA(n_components=2)
+    X_reduced = pca.fit_transform(X)
+
+    plt.figure()
+    plt.scatter(
+        X_reduced[:, 0],
+        X_reduced[:, 1],
+        c=y.reshape(-1),
+    )
+    plt.title("PCA visualization (2D)")
+    plt.xlabel("PC1")
+    plt.ylabel("PC2")
+    plt.colorbar(label="Transported")
+    plt.show()
+
+    print("Explained variance ratio:", pca.explained_variance_ratio_)
 
 
 def main():
@@ -254,8 +273,8 @@ def main():
     }
 
     # get_result(X_train, y_train, X_test, passenger_id, info)
-    get_validation(X_train, y_train, info)
-
+    # get_validation(X_train, y_train, info)
+    visualize_pca(X_train, y_train)
 
 if __name__ == "__main__":
     main()
