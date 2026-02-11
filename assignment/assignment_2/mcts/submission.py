@@ -1,5 +1,4 @@
 import numpy as np
-import random
 import time
                 
 def get_valid_columns(board):
@@ -10,12 +9,14 @@ def get_valid_columns(board):
             valid_cols.add(i)
     return valid_cols
 
-def drop_piece(board, action, mark):
+def drop_piece(board, action, mark, in_place=True):
+    if not in_place:
+        board = board.copy()
     n_rows = len(board)
     for i in range(n_rows):
         if i + 1 >= n_rows or (i + 1 < n_rows and board[i + 1, action] != 0):
             board[i, action] = mark
-            break
+            return board
 
 def check_win(board, mark, inarow):
     rows = len(board)
@@ -101,8 +102,7 @@ def get_opponent_mark(mark):
 
 def immediate_move(board, mark, inarow, valid_cols):
     for col in valid_cols:
-        temp = board.copy()
-        drop_piece(temp, col, mark)
+        temp = drop_piece(board, col, mark, in_place=False)
         if check_win(temp, mark, inarow):
             return col
     return None
@@ -113,6 +113,10 @@ def get_delta(mark, my_mark, opponent_mark):
     if mark == opponent_mark:
         return -1
     return 0
+
+def center_bias(cols, n_cols):
+    center = n_cols // 2
+    return min(cols, key=lambda c: abs(c - center))
 
 def roll_out(board, mark, inarow, my_mark, opponent_mark):
     opp_mark = get_opponent_mark(mark)
@@ -127,20 +131,20 @@ def roll_out(board, mark, inarow, my_mark, opponent_mark):
         if opp_mark_move is not None:
             return get_delta(opp_mark, my_mark, opponent_mark)
         
-        drop_piece(board, random.choice(list(valid_cols)), mark)
+        drop_piece(board, center_bias(valid_cols, board.shape[1]), mark)
         if check_win(board, mark, inarow):
             return get_delta(mark, my_mark, opponent_mark)
         
         valid_cols = get_valid_columns(board)
         if not valid_cols:
             return 0
-        drop_piece(board, random.choice(list(valid_cols)), opp_mark)
+        drop_piece(board, center_bias(valid_cols, board.shape[1]), opp_mark)
         if check_win(board, opp_mark, inarow):
             return get_delta(opp_mark, my_mark, opponent_mark)
         
     return 0
 
-def dfs(node: Node, board, mark, c, my_mark, opponent_mark, inarow):
+def dfs(node: Node, board, mark, c, my_mark, opponent_mark, inarow, table):
         
     if node.n_visits == 0:
         node.n_visits = 1
@@ -158,8 +162,17 @@ def dfs(node: Node, board, mark, c, my_mark, opponent_mark, inarow):
     
     child_moves = node.untried_moves & valid_cols
     if child_moves:
-        child_node = Node(board.shape[1])
-        child_move = random.choice(list(child_moves))
+        child_move = center_bias(child_moves, board.shape[1])
+        
+        next_board = drop_piece(board, child_move, mark, in_place=False)
+        board_hash = tuple(next_board.flatten())
+        
+        if board_hash in table:
+            child_node = table[board_hash]
+        else:
+            child_node = Node(board.shape[1])
+            table[board_hash] = child_node
+        
         node.untried_moves.discard(child_move)
         node.children[child_move] = child_node
         
@@ -172,12 +185,13 @@ def dfs(node: Node, board, mark, c, my_mark, opponent_mark, inarow):
     drop_piece(board, child_move, mark)
         
     delta = dfs(child_node, board, get_opponent_mark(mark), 
-                c, my_mark, opponent_mark, inarow)
+                c, my_mark, opponent_mark, inarow, table)
     node.n_wins += delta
     return delta
 
 root = None
 prev_board = None
+table = None
 def act(observation, configuration):
     n_rows = configuration.rows
     n_cols = configuration.columns
@@ -189,9 +203,10 @@ def act(observation, configuration):
     
     board = np.array(board).reshape(n_rows, n_cols)
         
-    global root, prev_board
+    global root, prev_board, table
     if not root:
-        root = Node(n_cols)    
+        root = Node(n_cols)  
+        table = {}
     if prev_board is not None:
         last_move = find_last_move(prev_board, board)
         if last_move is not None and root.children[last_move]:
@@ -202,14 +217,22 @@ def act(observation, configuration):
     valid_cols = get_valid_columns(board)  
     win_move = immediate_move(board, my_mark, inarow, valid_cols)    
     if win_move is not None:
-        root = root.children[win_move]
+        if root.children[win_move]:
+            root = root.children[win_move]
+        else:
+            root = Node(n_cols)
+
         drop_piece(board, win_move, my_mark)
         prev_board = board.copy()
         return win_move
     
     block_move = immediate_move(board, opponent_mark, inarow, valid_cols)
     if block_move is not None:
-        root = root.children[block_move]
+        if root.children[block_move]:
+            root = root.children[block_move]
+        else:
+            root = Node(n_cols)
+            
         drop_piece(board, block_move, my_mark)
         prev_board = board.copy()
         return block_move
@@ -218,7 +241,7 @@ def act(observation, configuration):
     start = time.time()
     while time.time() - start < 1.8:
         sim_board = board.copy()
-        dfs(root, sim_board, my_mark, c, my_mark, opponent_mark, inarow)
+        dfs(root, sim_board, my_mark, c, my_mark, opponent_mark, inarow, table)
     
     next_move = root.get_max_visit()
     root = root.children[next_move]
