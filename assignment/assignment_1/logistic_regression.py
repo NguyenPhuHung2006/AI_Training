@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
 
 def read_data(path: str):
     df = pd.read_csv(path)
@@ -174,6 +176,24 @@ def get_result(X_train, y_train, X_test, passenger_id, info):
 
     df_out.to_csv("outputs/logistic_regression.csv", index=False)
     
+def visualize_pca(X, y):
+    pca = PCA(n_components=2)
+    X_reduced = pca.fit_transform(X)
+
+    plt.figure()
+    plt.scatter(
+        X_reduced[:, 0],
+        X_reduced[:, 1],
+        c=y.reshape(-1),
+    )
+    plt.title("PCA visualization (2D)")
+    plt.xlabel("PC1")
+    plt.ylabel("PC2")
+    plt.colorbar(label="Transported")
+    plt.show()
+
+    print("Explained variance ratio:", pca.explained_variance_ratio_)
+    
 def main():
     
     X_train_raw, _ = read_data("data/train.csv")
@@ -182,14 +202,14 @@ def main():
     
     X_test_raw, passenger_id = read_data("data/test.csv")
     
-    normalized = True
+    normalized = False
 
     X_train_df, stats = fit_preprocess(X_train_raw, normalized)
     X_test_df = apply_preprocess(X_test_raw, stats, normalized)
     
     X_train = X_train_df.to_numpy(dtype=float)
     X_test  = X_test_df.to_numpy(dtype=float) 
-    
+        
     info = {
         "lr": 0.02,
         "num_iterations": 10000,
@@ -200,8 +220,9 @@ def main():
         "print_cost": False
     }
     
-    get_result(X_train, y_train, X_test, passenger_id, info)
+    # get_result(X_train, y_train, X_test, passenger_id, info)
     # get_validation(X_train, y_train, info)
+    visualize_pca(X_train, y_train)
 
 if __name__ == "__main__":
     main()
