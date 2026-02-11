@@ -1,5 +1,6 @@
 import numpy as np
 import random
+import time
                 
 def get_valid_columns(board):
     valid_cols = set()
@@ -98,21 +99,44 @@ class Node:
 def get_opponent_mark(mark):
     return 1 if mark == 2 else 2
 
-def roll_out(board, mark, inarow):
-    opponent_mark = get_opponent_mark(mark)
+def immediate_move(board, mark, inarow, valid_cols):
+    for col in valid_cols:
+        temp = board.copy()
+        drop_piece(temp, col, mark)
+        if check_win(temp, mark, inarow):
+            return col
+    return None
+
+def get_delta(mark, my_mark, opponent_mark):
+    if mark == my_mark:
+        return 1
+    if mark == opponent_mark:
+        return -1
+    return 0
+
+def roll_out(board, mark, inarow, my_mark, opponent_mark):
+    opp_mark = get_opponent_mark(mark)
     valid_cols = get_valid_columns(board)
     while valid_cols:
         
+        mark_move = immediate_move(board, mark, inarow, valid_cols)
+        if mark_move is not None:
+            return get_delta(mark, my_mark, opponent_mark)
+        
+        opp_mark_move = immediate_move(board, opp_mark, inarow, valid_cols)
+        if opp_mark_move is not None:
+            return get_delta(opp_mark, my_mark, opponent_mark)
+        
         drop_piece(board, random.choice(list(valid_cols)), mark)
         if check_win(board, mark, inarow):
-            return mark
+            return get_delta(mark, my_mark, opponent_mark)
         
         valid_cols = get_valid_columns(board)
         if not valid_cols:
             return 0
-        drop_piece(board, random.choice(list(valid_cols)), opponent_mark)
-        if check_win(board, opponent_mark, inarow):
-            return opponent_mark
+        drop_piece(board, random.choice(list(valid_cols)), opp_mark)
+        if check_win(board, opp_mark, inarow):
+            return get_delta(opp_mark, my_mark, opponent_mark)
         
     return 0
 
@@ -120,12 +144,7 @@ def dfs(node: Node, board, mark, c, my_mark, opponent_mark, inarow):
         
     if node.n_visits == 0:
         node.n_visits = 1
-        win_mark = roll_out(board, mark, inarow)
-        delta = 0
-        if win_mark == my_mark:
-            delta = 1
-        elif win_mark == opponent_mark:
-            delta = -1
+        delta = roll_out(board, mark, inarow, my_mark, opponent_mark)
         node.n_wins += delta
         return delta
         
@@ -179,10 +198,25 @@ def act(observation, configuration):
             root = root.children[last_move]
         else:
             root = Node(n_cols)
+        
+    valid_cols = get_valid_columns(board)  
+    win_move = immediate_move(board, my_mark, inarow, valid_cols)    
+    if win_move is not None:
+        root = root.children[win_move]
+        drop_piece(board, win_move, my_mark)
+        prev_board = board.copy()
+        return win_move
+    
+    block_move = immediate_move(board, opponent_mark, inarow, valid_cols)
+    if block_move is not None:
+        root = root.children[block_move]
+        drop_piece(board, block_move, my_mark)
+        prev_board = board.copy()
+        return block_move
 
-    n_simulation = 1000
-    c = 2
-    for _ in range(n_simulation):
+    c = 1.0
+    start = time.time()
+    while time.time() - start < 1.8:
         sim_board = board.copy()
         dfs(root, sim_board, my_mark, c, my_mark, opponent_mark, inarow)
     
