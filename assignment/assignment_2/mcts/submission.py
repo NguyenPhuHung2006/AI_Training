@@ -1,0 +1,194 @@
+import numpy as np
+import random
+                
+def get_valid_columns(board):
+    valid_cols = set()
+    n_cols = len(board[0])
+    for i in range(n_cols):
+        if board[0, i] == 0:
+            valid_cols.add(i)
+    return valid_cols
+
+def drop_piece(board, action, mark):
+    n_rows = len(board)
+    for i in range(n_rows):
+        if i + 1 >= n_rows or (i + 1 < n_rows and board[i + 1, action] != 0):
+            board[i, action] = mark
+            break
+
+def check_win(board, mark, inarow):
+    rows = len(board)
+    cols = len(board[0])
+
+    directions = [
+        (0, 1),   # horizontal →
+        (1, 0),   # vertical ↓
+        (1, 1),   # diagonal ↘
+        (1, -1)   # diagonal ↙
+    ]
+
+    for r in range(rows):
+        for c in range(cols):
+            if board[r, c] != mark:
+                continue
+
+            for dr, dc in directions:
+                count = 0
+                rr, cc = r, c
+
+                while (
+                    0 <= rr < rows and
+                    0 <= cc < cols and
+                    board[rr, cc] == mark
+                ):
+                    count += 1
+                    if count == inarow:
+                        return True
+                    rr += dr
+                    cc += dc
+
+    return False
+
+def find_last_move(prev_board, current_board):
+    diff = current_board - prev_board
+    for col in range(diff.shape[1]):
+        if np.any(diff[:, col] != 0):
+            return col
+    return None
+
+class Node:
+    def __init__(self, n_cols=7):
+        self.n_visits = 0
+        self.n_wins = 0
+        self.children = [None] * n_cols
+        self.untried_moves = {cols for cols in range(n_cols)}
+        self.is_full = False
+        
+    def compute_uct(self, c, n_prev_visits):
+        if self.n_visits == 0:
+            return np.inf
+        return (self.n_wins / self.n_visits) + c * np.sqrt(np.log(n_prev_visits) / self.n_visits)
+        
+    def get_max_uct(self, c):
+        node = None
+        max_uct = -np.inf
+        max_move = None
+        for move, child in enumerate(self.children):
+            if child is None:
+                continue
+            uct = child.compute_uct(c, self.n_visits)
+            if uct > max_uct:
+                node = child
+                max_uct = uct
+                max_move = move
+        
+        return node, max_move
+    
+    def get_max_visit(self):
+        max_visit = -np.inf
+        max_move = None
+        for move, child in enumerate(self.children):
+            if child is None:
+                continue
+            if child.n_visits > max_visit:
+                max_move = move
+                max_visit = child.n_visits
+        return max_move                
+
+def get_opponent_mark(mark):
+    return 1 if mark == 2 else 2
+
+def roll_out(board, mark, inarow):
+    opponent_mark = get_opponent_mark(mark)
+    valid_cols = get_valid_columns(board)
+    while valid_cols:
+        
+        drop_piece(board, random.choice(list(valid_cols)), mark)
+        if check_win(board, mark, inarow):
+            return mark
+        
+        valid_cols = get_valid_columns(board)
+        if not valid_cols:
+            return 0
+        drop_piece(board, random.choice(list(valid_cols)), opponent_mark)
+        if check_win(board, opponent_mark, inarow):
+            return opponent_mark
+        
+    return 0
+
+def dfs(node: Node, board, mark, c, my_mark, opponent_mark, inarow):
+        
+    if node.n_visits == 0:
+        node.n_visits = 1
+        win_mark = roll_out(board, mark, inarow)
+        delta = 0
+        if win_mark == my_mark:
+            delta = 1
+        elif win_mark == opponent_mark:
+            delta = -1
+        node.n_wins += delta
+        return delta
+        
+    node.n_visits += 1
+    child_node = None
+    child_move = None
+    valid_cols = get_valid_columns(board)
+    
+    if not valid_cols:
+        return 0
+    
+    child_moves = node.untried_moves & valid_cols
+    if child_moves:
+        child_node = Node(board.shape[1])
+        child_move = random.choice(list(child_moves))
+        node.untried_moves.discard(child_move)
+        node.children[child_move] = child_node
+        
+    else:
+        child_node, child_move = node.get_max_uct(c)
+        
+    if child_move is None:
+        return 0
+    
+    drop_piece(board, child_move, mark)
+        
+    delta = dfs(child_node, board, get_opponent_mark(mark), 
+                c, my_mark, opponent_mark, inarow)
+    node.n_wins += delta
+    return delta
+
+root = None
+prev_board = None
+def act(observation, configuration):
+    n_rows = configuration.rows
+    n_cols = configuration.columns
+    inarow = configuration.inarow
+    board = observation.board
+    
+    my_mark = observation.mark
+    opponent_mark = 1 if my_mark == 2 else 2
+    
+    board = np.array(board).reshape(n_rows, n_cols)
+        
+    global root, prev_board
+    if not root:
+        root = Node(n_cols)    
+    if prev_board is not None:
+        last_move = find_last_move(prev_board, board)
+        if last_move is not None and root.children[last_move]:
+            root = root.children[last_move]
+        else:
+            root = Node(n_cols)
+
+    n_simulation = 1000
+    c = 2
+    for _ in range(n_simulation):
+        sim_board = board.copy()
+        dfs(root, sim_board, my_mark, c, my_mark, opponent_mark, inarow)
+    
+    next_move = root.get_max_visit()
+    root = root.children[next_move]
+    drop_piece(board, next_move, my_mark)
+    prev_board = board.copy()
+    return next_move
+    
