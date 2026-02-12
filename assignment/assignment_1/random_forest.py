@@ -161,17 +161,20 @@ class RandomDecisionTree:
 
         self.root = self.build_decision_tree(X, y)
         
-    def predict(self, x, node):
+    def _predict(self, x, node):
         if node.value is not None:
             return node.value
         if x[node.feature] <= node.threshold:
-            return self.predict(x, node.left)
-        return self.predict(x, node.right)
+            return self._predict(x, node.left)
+        return self._predict(x, node.right)
+    
+    def predict(self, x):
+        return self._predict(x, self.root)
     
     def predict_batch(self, X):
         if self.root is None:
             raise ValueError("The tree has not been trained yet.") 
-        return np.array([self.predict(x, self.root) for x in X])
+        return np.array([self.predict(x) for x in X])
     
 class RandomForest:
     def __init__(self, max_depth, min_samples, n_trees):
