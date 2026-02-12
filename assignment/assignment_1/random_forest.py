@@ -62,59 +62,6 @@ def read_data(train_path, test_path):
 
     return x_train, y_train, x_test, passenger_id
 
-
-def compute_entropy(p):
-    if p == 0 or p == 1:
-        return 0
-    return -(p * np.log2(p) + (1 - p) * np.log2(1 - p))
-
-
-def compute_score(x, y):
-    thresholds = np.percentile(x, np.linspace(2, 98, 50))
-    thresholds = np.unique(thresholds)
-    n_samples = len(y)
-
-    best_score = float("inf")
-    best_threshold = None
-
-    for threshold in thresholds:
-        
-        left = y[x <= threshold]
-        right = y[x > threshold]
-
-        if len(left) == 0 or len(right) == 0:
-            continue
-
-        w_left = len(left) / n_samples
-        w_right = len(right) / n_samples
-
-        score = (
-            w_left * compute_entropy(left.mean())
-            + w_right * compute_entropy(right.mean())
-        )
-
-        if score < best_score:
-            best_score = score
-            best_threshold = threshold
-
-    return best_score, best_threshold
-
-
-def best_split(X, y, feature_indices):
-    best_feature = None
-    best_threshold = None
-    best_score = float("inf")
-
-    for feature in feature_indices:
-        score, threshold = compute_score(X[:, feature], y)
-        if score < best_score:
-            best_score = score
-            best_feature = feature
-            best_threshold = threshold
-
-    return best_feature, best_threshold
-
-
 class Node:
     def __init__(self, feature=None, threshold=None, left=None, right=None, value=None):
         self.feature = feature
@@ -123,116 +70,160 @@ class Node:
         self.right = right
         self.value = value
 
-
-def most_frequent_value(y):
-    values, counts = np.unique(y, return_counts=True)
-    return values[np.argmax(counts)]
-
-
-def build_decision_tree(X, y, depth=0, max_depth=5, min_samples=10):
-    if (
-        (max_depth is not None and depth >= max_depth)
-        or len(y) < min_samples
-        or len(np.unique(y)) == 1
-    ):
-        return Node(value=most_frequent_value(y))
-
-    n_features = X.shape[1]
-    feature_indices = random_features_indices(n_features)
-
-    feature, threshold = best_split(X, y, feature_indices)
-
-    if feature is None or threshold is None:
-        return Node(value=most_frequent_value(y))
-
-    left_mask = X[:, feature] <= threshold
-    right_mask = ~left_mask
-
-    left = build_decision_tree(
-        X[left_mask], y[left_mask],
-        depth + 1, max_depth, min_samples
-    )
-    right = build_decision_tree(
-        X[right_mask], y[right_mask],
-        depth + 1, max_depth, min_samples
-    )
-
-    return Node(feature=feature, threshold=threshold, left=left, right=right)
-
-
-def predict_tree(x, node):
-    if node.value is not None:
-        return node.value
-
-    if x[node.feature] <= node.threshold:
-        return predict_tree(x, node.left)
-
-    return predict_tree(x, node.right)
-
-
-def predict_tree_batch(X, root):
-    return np.array([predict_tree(x, root) for x in X])
-
-
-def random_sample(X, y):
-    n = len(X)
-    idx = np.random.choice(n, size=n, replace=True)
-    return X[idx], y[idx]
-
-
-def random_features_indices(n_features):
-    m = int(np.sqrt(n_features))
-    return np.random.choice(n_features, m, replace=False)
-
-
-def build_random_forest(X, y, info):
-    forest = []
-
-    for i in range(info["n_trees"]):
+class RandomDecisionTree:
+    def __init__(self, max_depth, min_samples):
+        self.max_depth = max_depth
+        self.min_samples = min_samples
+        self.root = None
         
-        if i % 5 == 0:
-            print(i)
+    def binary_entropy(self, p):
+        if p == 0 or p == 1:
+            return 0
+        return -(p * np.log2(p) + (1 - p) * np.log2(1 - p))
+    
+    def most_frequent_value(self, y):
+        values, counts = np.unique(y, return_counts=True)
+        return values[np.argmax(counts)].astype(bool)
+    
+    def compute_score(self, x, y):
+        thresholds = np.unique(x)
+        n_thresholds = len(thresholds)
+        n_samples = len(y)
+        best_score, best_threshold = float("inf"), None
+            
+        for i in range(n_thresholds - 1):
+            threshold = (thresholds[i] + thresholds[i + 1]) / 2
+            left = y[x <= threshold]
+            right = y[x > threshold]
+            n_left = len(left)
+            n_right = len(right)
+            
+            if n_left == 0 or n_right == 0:
+                continue
+            
+            w_left = n_left / n_samples
+            w_right = n_right / n_samples
+            
+            # y values are 0 and 1
+            p_left = left.mean()
+            p_right = right.mean()
+            
+            score = w_left * self.binary_entropy(p_left) + w_right * self.binary_entropy(p_right)
+            if score < best_score:
+                best_score = score
+                best_threshold = threshold
+                
+        return best_score, best_threshold
+    
+    def best_split(self, X, y, feature_indices):
+        best_feature = None
+        best_threshold = None
+        best_score = float("inf")
+
+        for feature in feature_indices:
+            score, threshold = self.compute_score(X[:, feature], y)
+            if score < best_score:
+                best_score = score
+                best_feature = feature
+                best_threshold = threshold
+
+        return best_feature, best_threshold
+    
+    def random_features_indices(self, n_features):
+        m = int(np.sqrt(n_features))
+        return np.random.choice(n_features, m, replace=False)
+    
+    def build_decision_tree(self, X, y, depth=0):
+        if (self.max_depth and depth >= self.max_depth) or len(y) < self.min_samples or len(np.unique(y)) == 1:
+            return Node(value=self.most_frequent_value(y))
         
-        Xb, yb = random_sample(X, y)
+        n_features = X.shape[1]
+        feature_indices = self.random_features_indices(n_features)
+        
+        feature, threshold = self.best_split(X, y, feature_indices)
+        
+        # in case there's a bug in the code
+        if feature is None or threshold is None:
+            return Node(value=self.most_frequent_value(y))
+        
+        left_mask = X[:, feature] <= threshold
+        right_mask = ~left_mask
+        
+        left = self.build_decision_tree(X[left_mask], y[left_mask], depth + 1)
+        right = self.build_decision_tree(X[right_mask], y[right_mask], depth + 1)
+        
+        return Node(feature=feature, threshold=threshold, left=left, right=right)
+    
+    def fit(self, X, y):
+        unique = np.unique(y)
+        if not set(unique).issubset({0,1}):
+            raise ValueError("Only binary labels {0,1} are supported.")
 
-        tree = build_decision_tree(
-            Xb,
-            yb,
-            max_depth=info["max_depth"],
-            min_samples=info["min_samples"]
-        )
+        self.root = self.build_decision_tree(X, y)
+        
+    def predict(self, x, node):
+        if node.value is not None:
+            return node.value
+        if x[node.feature] <= node.threshold:
+            return self.predict(x, node.left)
+        return self.predict(x, node.right)
+    
+    def predict_batch(self, X):
+        if self.root is None:
+            raise ValueError("The tree has not been trained yet.") 
+        return np.array([self.predict(x, self.root) for x in X])
+    
+class RandomForest:
+    def __init__(self, max_depth, min_samples, n_trees):
+        self.max_depth = max_depth
+        self.min_samples = min_samples
+        self.n_trees = n_trees
+        self.forest = []
+        
+    def random_sample(self, X, y):
+        n = len(X)
+        idx = np.random.choice(n, size=n, replace=True)
+        return X[idx], y[idx]
+    
+    def fit(self, X, y, check_every=True):
+        self.forest = []
+        for i in range(self.n_trees):
+            if i > 0 and check_every and i % max(1, self.n_trees // 10) == 0:
+                print(i)
+            
+            Xb, yb = self.random_sample(X, y)
+            tree = RandomDecisionTree(self.max_depth, self.min_samples)
+            tree.fit(Xb, yb)
+            
+            self.forest.append(tree)
+            
+    def predict(self, x):
+        votes = [tree.predict(x, tree.root) for tree in self.forest]
+        return Counter(votes).most_common(1)[0][0].astype(bool)
+    
+    def predict_batch(self, X):
+        return np.array([self.predict(x) for x in X])
+    
+    def fit_with_validation(self, X, y, test_size=0.2, random_state=42, check_every=True):
+        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=test_size, random_state=random_state)
+        
+        self.fit(X_train, y_train, check_every=check_every)
+        
+        y_train_predict = self.predict_batch(X_train)
+        y_val_predict = self.predict_batch(X_val)
+        
+        print(f"accuracy | train:{np.mean(y_train_predict == y_train) * 100:.2f} | validation: {np.mean(y_val_predict == y_val) * 100:.2f}")
 
-        forest.append(tree)
 
-    return forest
-
-
-def predict_forest(x, forest):
-    votes = [predict_tree(x, tree) for tree in forest]
-    return Counter(votes).most_common(1)[0][0].astype(bool)
+def get_validation(X_train, y_train, model: RandomForest):
+    model.fit_with_validation(X_train, y_train)
 
 
-def predict_forest_batch(X, forest):
-    return np.array([predict_forest(x, forest) for x in X])
-
-
-def get_validation(X_train, y_train, info):
-    X_tr, X_val, y_tr, y_val = train_test_split(
-        X_train, y_train, test_size=0.2, random_state=42
-    )
-
-    forest = build_random_forest(X_tr, y_tr, info)
-
-    train_acc = np.mean(predict_forest_batch(X_tr, forest) == y_tr)
-    val_acc = np.mean(predict_forest_batch(X_val, forest) == y_val)
-
-    print(f"accuracy | train: {train_acc} | validation: {val_acc}")
-
-
-def get_result(X_train, y_train, X_test, passenger_id, info):
-    forest = build_random_forest(X_train, y_train, info)
-
-    y_predict = predict_forest_batch(X_test, forest)
+def get_result(X_train, y_train, X_test, passenger_id, model):
+    
+    model.fit(X_train, y_train)
+    
+    y_predict = model.predict_batch(X_test)
 
     df_out = pd.DataFrame({
         "PassengerId": passenger_id,
@@ -265,16 +256,12 @@ def main():
         "data/train.csv",
         "data/test.csv"
     )
+    
+    model = RandomForest(max_depth=None, min_samples=10, n_trees=100)
 
-    info = {
-        "max_depth": None,
-        "min_samples": 10,
-        "n_trees": 100
-    }
-
-    # get_result(X_train, y_train, X_test, passenger_id, info)
-    # get_validation(X_train, y_train, info)
-    visualize_pca(X_train, y_train)
+    get_result(X_train, y_train, X_test, passenger_id, model)
+    # get_validation(X_train, y_train, model)
+    # visualize_pca(X_train, y_train)
 
 if __name__ == "__main__":
     main()
