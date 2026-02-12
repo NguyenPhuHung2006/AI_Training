@@ -93,80 +93,109 @@ def apply_preprocess(df, stats, normalized):
 
     return df
 
+class LogisticRegression:
+    def __init__(self, n_features):
+        self.w = np.zeros((n_features, 1))
+        self.b = 0
+        
+    def sigmoid(self, z):
+        z = np.clip(z, -500, 500)
+        return 1 / (1 + np.exp(-z))
     
-def sigmoid(z):
-    z = np.clip(z, -500, 500)
-    return 1 / (1 + np.exp(-z))
-
-def gradient_descent(X_train, y_train, w, b, lr, lambda_=0):
-    y_predict = sigmoid(X_train @ w + b)
+    def get_parameters(self):
+        return self.w, self.b
     
-    m = X_train.shape[0]
+    def clear_parameters(self):
+        self.w = np.zeros_like(self.w)
+        self.b = 0
     
-    dw = (X_train.T @ (y_predict - y_train) + lambda_ * w) / m
-    db = np.mean(y_predict - y_train)
-    
-    w -= lr * dw
-    b -= lr * db
-    
-    return w, b
-
-def compute_cost(X, y, w, b, lambda_):
-    py = sigmoid(X @ w + b)
-    eps = 1e-8
-    cost = -np.mean(y * np.log(py + eps) + (1 - y) * np.log(1 - py + eps))
-    reg = (lambda_ * np.sum(w ** 2)) / (2 * X.shape[0]) 
-    
-    return cost + reg
-
-def compute_accuracy(X, y, w, b):
-    y_predict = predict(X, w, b)
-    y_predict = y_predict.reshape(-1)
-    y = y.reshape(-1)
-    return np.mean(y_predict == y, axis=0)
-    
-def predict(X_test, w, b):
-    return sigmoid(X_test @ w + b) >= 0.5
-
-def get_validation(X_train, y_train, info):
-    lr = info["lr"]
-    num_iterations = info["num_iterations"]
-    lambda_ = info["lambda_"]
-    w = info["w"]
-    b = info["b"]
-    check_interval = info["check_interval"]
-    print_cost = info["print_cost"]
-
-    X_tr, X_val, y_tr, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=42)
-    for i in range(0, num_iterations):
-        w, b = gradient_descent(X_tr, y_tr, w, b, lr, lambda_)
-        if i % check_interval == 0:
-            if print_cost:
-                cost_train = compute_cost(X_tr, y_tr, w, b, lambda_)
-                cost_val = compute_cost(X_val, y_val, w, b, lambda_)
-                print(f"cost :{i} | train: {cost_train:.4f} | validation: {cost_val:.4f}")
-            else:
-                accuracy_train = compute_accuracy(X_tr, y_tr, w, b)
-                accuracy_val = compute_accuracy(X_val, y_val, w, b)
-                print(f"accuracy :{i} | train: {accuracy_train * 100:.4f}% | validation: {accuracy_val * 100:.4f}%")
-    
-
-def get_result(X_train, y_train, X_test, passenger_id, info):
-    lr = info["lr"]
-    num_iterations = info["num_iterations"]
-    lambda_ = info["lambda_"]
-    w = info["w"]
-    b = info["b"]
-    check_interval = info["check_interval"]
-    
-    for i in range(0, num_iterations):
-        w, b = gradient_descent(X_train, y_train, w, b, lr, lambda_)
-        if i % check_interval == 0:
-            cost = compute_cost(X_train, y_train, w, b, lambda_)
-            accuracy = compute_accuracy(X_train, y_train, w, b)
-            print(f"i:{i} | cost: {cost:.4f} | accuracy: {accuracy * 100:.4f}%")
+    def check_shape(self, X, y):
+        if X.shape[1] != self.w.shape[0]:
+            raise ValueError(
+                f"the input expected {self.w.shape[0]} features, got {X.shape[1]}" 
+            )
+        
+        if y.shape[1] != 1:
+            raise ValueError(
+                f"the output expected 1 feature, got {y.shape[1]}" 
+            )
             
-    y_test = predict(X_test, w, b)
+    def compute_accuracy(self, X, y):
+        y_pred = self.predict(X)
+        return np.mean(y_pred == y)
+    
+    def compute_cost(self, X, y, lambda_):
+        y_pred = self.forward(X)
+        eps = 1e-8
+        m = X.shape[0]
+        cost = -np.mean(y * np.log(y_pred + eps) + (1 - y) * np.log(1 - y_pred + eps))
+        reg = (lambda_ * np.sum(self.w**2)) / (2 * m)
+        return cost + reg
+            
+    def predict(self, X, threshold=0.5):
+        y_pred = self.sigmoid(X @ self.w + self.b)
+        if threshold is not None:
+            return (y_pred >= threshold).astype(int)
+        return y_pred
+    
+    def forward(self, X):
+        return self.sigmoid(X @ self.w + self.b)
+            
+    def gradient_descent(self, X, y, lr, lambda_):
+        y_pred = self.forward(X)
+
+        m = X.shape[0]   
+        dw = (X.T @ (y_pred - y) + lambda_ * self.w) / m
+        db = (np.sum(y_pred - y)) / m
+        
+        self.w -= lr * dw
+        self.b -= lr * db
+
+    def fit(self, X, y, n_iteration=10000, lr=0.01, lambda_=0, print_accuracy=True, check_every=1000):
+        self.check_shape(X, y)
+        
+        for i in range(n_iteration):
+            self.gradient_descent(X, y, lr, lambda_)
+            
+            if print_accuracy and i > 0 and i % max(1, check_every) == 0:
+                accuracy = self.compute_accuracy(X, y)
+                print(f"{i} | acc:{accuracy * 100:.2f}")
+                
+    def fit_with_validation(self, X, y, test_size=0.2, random_state=42, 
+                            n_iteration=10000, lr=0.01, lambda_=0, 
+                            print_accuracy=True, check_every=1000):
+        self.check_shape(X, y)
+        
+        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=test_size, random_state=random_state)
+            
+        for i in range(n_iteration):
+            self.gradient_descent(X_train, y_train, lr, lambda_)
+            
+            if print_accuracy and i > 0 and i % max(1, check_every) == 0:
+                train_accuracy = self.compute_accuracy(X_train, y_train)
+                validation_accuracy = self.compute_accuracy(X_val, y_val)
+                print(f"{i} | train:{train_accuracy * 100:.2f} | validation:{validation_accuracy * 100:.2f}")
+        
+def get_validation(X_train, y_train, info, model: LogisticRegression):
+    lr = info["lr"]
+    num_iterations = info["num_iterations"]
+    lambda_ = info["lambda_"]
+    check_interval = info["check_interval"]
+    print_accuracy = info["print_accuracy"]
+    
+    model.fit_with_validation(X_train, y_train, lr=lr, n_iteration=num_iterations, lambda_=lambda_, 
+                              print_accuracy=print_accuracy, check_every=check_interval)
+    
+
+def get_result(X_train, y_train, X_test, passenger_id, info, model: LogisticRegression):
+    lr = info["lr"]
+    num_iterations = info["num_iterations"]
+    lambda_ = info["lambda_"]
+    check_interval = info["check_interval"]
+    
+    model.fit(X_train, y_train, n_iteration=num_iterations, lr=lr, lambda_=lambda_, check_every=check_interval)
+            
+    y_test = model.predict(X_test)
     y_test = y_test.reshape(-1)
     
     df_out = pd.DataFrame({
@@ -202,7 +231,7 @@ def main():
     
     X_test_raw, passenger_id = read_data("data/test.csv")
     
-    normalized = False
+    normalized = True
 
     X_train_df, stats = fit_preprocess(X_train_raw, normalized)
     X_test_df = apply_preprocess(X_test_raw, stats, normalized)
@@ -214,15 +243,15 @@ def main():
         "lr": 0.02,
         "num_iterations": 10000,
         "lambda_": 0.02,
-        "w": np.zeros((X_train.shape[1], 1)),
-        "b": 0.0,
         "check_interval": 1000,
-        "print_cost": False
+        "print_accuracy": True
     }
     
-    # get_result(X_train, y_train, X_test, passenger_id, info)
-    # get_validation(X_train, y_train, info)
-    visualize_pca(X_train, y_train)
+    model = LogisticRegression(X_train.shape[1])
+    
+    # get_result(X_train, y_train, X_test, passenger_id, info, model)
+    get_validation(X_train, y_train, info, model)
+    # visualize_pca(X_train, y_train)
 
 if __name__ == "__main__":
     main()
