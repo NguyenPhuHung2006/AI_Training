@@ -141,7 +141,7 @@ class RandomForest:
             self.forest.append(tree)
             
     def predict(self, x):
-        votes = [tree.predict(x, tree.root) for tree in self.forest]
+        votes = [tree.predict(x) for tree in self.forest]
         return Counter(votes).most_common(1)[0][0].astype(bool)
     
     def predict_batch(self, X):
