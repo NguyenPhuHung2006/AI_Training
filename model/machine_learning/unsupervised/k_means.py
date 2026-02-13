@@ -43,31 +43,23 @@ class KMeans:
         if not in_place:
             clusters = clusters.copy()
             
-        updated = True
-        index = None
+        index_clusters = None
         for _ in range(max_iters):
-            if not updated:
-                break
-            updated = False
+            
             index_clusters = self.get_index_clusters(X, clusters)
-            
-            if np.array_equal(index_clusters, index):
-                break
-            
-            index = index_clusters
+            new_clusters = np.zeros_like(clusters)
             
             for j in range(k):
                 mask = (index_clusters == j)
-                if not np.any(mask):
-                    clusters[j] = X[np.random.randint(0, m)]
-                    updated = True
-                    continue
-                next_clusters = X[mask].mean(axis=0)
-                if not updated and not np.allclose(clusters[j], next_clusters):
-                    updated = True
-                clusters[j] = next_clusters
+                if np.any(mask):
+                    new_clusters[j] = X[mask].mean(axis=0)
+                else:
+                    new_clusters[j] = X[np.random.randint(0, m)]
+            
+            if np.allclose(clusters, new_clusters):
+                break
         
-        return clusters, index
+        return clusters, index_clusters
             
     def compute_score(self, dist_matrix, index, k, m):
         sum_s = 0
