@@ -1,6 +1,68 @@
 import numpy as np
 from abc import ABC, abstractmethod
 from sklearn.model_selection import train_test_split
+import pandas as pd
+
+def split_cabin_column(df):
+    df = df.copy()
+    cabin = df["Cabin"].str.split("/", expand=True)
+
+    df["Deck"] = cabin[0].fillna("Unknown")
+    df["CabinNum"] = pd.to_numeric(cabin[1], errors="coerce")
+    df["Side"] = cabin[2].fillna("Unknown")
+
+    df = df.drop(columns=["Cabin"])
+    return df
+
+
+def fillna_cat_cols(df, cat_cols):
+    df = df.copy()
+    df[cat_cols] = df[cat_cols].fillna("Unknown")
+    df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
+    return df
+
+def read_data(train_path, test_path):
+    df_train = pd.read_csv(train_path)
+    df_test = pd.read_csv(test_path)
+
+    passenger_id = df_test["PassengerId"]
+
+    # drop unnecessary columns
+    drop_cols = ["PassengerId", "Name"]
+    df_train = df_train.drop(columns=drop_cols)
+    df_test = df_test.drop(columns=drop_cols)
+
+    # split cabin column
+    df_train = split_cabin_column(df_train)
+    df_test = split_cabin_column(df_test)
+    
+    # categorical columns
+    cat_cols = ["CryoSleep", "VIP", "HomePlanet", "Destination", "Deck", "Side"]
+    df_train = fillna_cat_cols(df_train, cat_cols)
+    df_test = fillna_cat_cols(df_test, cat_cols)
+
+    # numerical columns
+    num_cols = [
+        "RoomService", "FoodCourt", "ShoppingMall",
+        "Spa", "VRDeck", "Age", "CabinNum"
+    ]
+    num_medians = df_train[num_cols].median()
+    df_train[num_cols] = df_train[num_cols].fillna(num_medians)
+    df_test[num_cols] = df_test[num_cols].fillna(num_medians)
+
+    y_train = df_train["Transported"].to_numpy().astype(int)
+    df_train = df_train.drop(columns="Transported")
+
+    df_train = df_train.reindex(columns=df_test.columns, fill_value=0)
+
+    x_train = df_train.to_numpy().astype(float)
+    x_test = df_test.to_numpy().astype(float)
+
+    return x_train, y_train, x_test, passenger_id
+
+import numpy as np
+from abc import ABC, abstractmethod
+from sklearn.model_selection import train_test_split
 
 class GB_BaseLoss(ABC):
     
@@ -243,3 +305,41 @@ class GradientBoosting:
             f"train:{self.loss.evaluate(y_train, y_train_predict):.4f} | "
             f"validation:{self.loss.evaluate(y_val, y_val_predict):.4f}"
         )   
+          
+def get_validation(X_train, y_train, model):
+    model.fit_with_validation(X_train, y_train, check_every=2)
+
+def get_result(X_train, y_train, X_test, passenger_id, model):
+    
+    model.fit(X_train, y_train, 2)
+    
+    y_predict = model.predict(X_test)
+    
+    y_predict = model.loss.predict_label(y_predict).astype(bool)
+
+    df_out = pd.DataFrame({
+        "PassengerId": passenger_id,
+        "Transported": y_predict
+    })
+
+    df_out.to_csv("outputs/gradient_boosting.csv", index=False)
+
+def main():
+    X_train, y_train, X_test, passenger_id = read_data(
+        "data/train.csv",
+        "data/test.csv"
+    )
+    
+    model = GradientBoosting(GB_BCE(), 
+                             learning_rate=0.05, 
+                             max_depth=3, 
+                             min_samples=10, 
+                             lambda_=0, 
+                             n_trees=200)
+
+    get_result(X_train, y_train, X_test, passenger_id, model)
+    # get_validation(X_train, y_train, model)
+
+if __name__ == "__main__":
+    main()
+    print("completed")
