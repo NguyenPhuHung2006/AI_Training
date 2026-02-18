@@ -71,16 +71,16 @@ class GB_DecisionTree:
         self.min_samples = min_samples
         self.root = None
         
-    def gain(self, g_left, h_left, g_right, h_right, g_total, h_total):
+    def gain(self, g_left, h_left, g_right, h_right, g_total, h_total, lambda_):
         eps = 1e-15
 
-        left_score = (g_left ** 2) / (h_left + eps)
-        right_score = (g_right ** 2) / (h_right + eps)
-        parent_score = (g_total ** 2) / (h_total + eps)
+        left_score = (g_left ** 2) / (h_left + lambda_ + eps)
+        right_score = (g_right ** 2) / (h_right + lambda_ + eps)
+        parent_score = (g_total ** 2) / (h_total + lambda_ + eps)
 
         return left_score + right_score - parent_score
     
-    def compute_score(self, x, gradients, hessians):
+    def compute_score(self, x, gradients, hessians, lambda_):
         thresholds = np.unique(x)
         best_gain = -float("inf")
         best_threshold = None
@@ -106,7 +106,8 @@ class GB_DecisionTree:
             gain = self.gain(
                 g_left, h_left,
                 g_right, h_right,
-                g_total, h_total
+                g_total, h_total,
+                lambda_
             )
 
             if gain > best_gain:
@@ -116,7 +117,7 @@ class GB_DecisionTree:
         return best_gain, best_threshold
 
     
-    def best_split(self, X, gradients, hessians):
+    def best_split(self, X, gradients, hessians, lambda_):
         best_feature = None
         best_threshold = None
         best_gain = -float("inf")
@@ -125,7 +126,7 @@ class GB_DecisionTree:
 
         for feature in range(n_features):
             gain, threshold = self.compute_score(
-                X[:, feature], gradients, hessians
+                X[:, feature], gradients, hessians, lambda_
             )
 
             if gain > best_gain:
@@ -136,11 +137,11 @@ class GB_DecisionTree:
         return best_feature, best_threshold, best_gain
 
     
-    def build_decision_tree(self, X, gradients, hessians, loss, depth=0):
-        if (self.max_depth and depth >= self.max_depth) or X.shape[0] < self.min_samples:
+    def build_decision_tree(self, X, gradients, hessians, loss, lambda_, depth=0):
+        if (self.max_depth and depth >= self.max_depth) or X.shape[0] <= self.min_samples:
             return GB_Node(value=loss.leaf_value(gradients, hessians))
         
-        feature, threshold, gain = self.best_split(X, gradients, hessians)
+        feature, threshold, gain = self.best_split(X, gradients, hessians, lambda_)
         
         # in case there's a bug in the code
         if feature is None or threshold is None or gain <= 0:
@@ -149,32 +150,73 @@ class GB_DecisionTree:
         left_mask = X[:, feature] <= threshold
         right_mask = ~left_mask
         
-        left = self.build_decision_tree(X[left_mask], gradients[left_mask], hessians[left_mask], loss, depth + 1)
-        right = self.build_decision_tree(X[right_mask], gradients[right_mask], hessians[right_mask], loss, depth + 1)
+        left = self.build_decision_tree(
+            X[left_mask], 
+            gradients[left_mask], 
+            hessians[left_mask], 
+            loss, lambda_, depth + 1)
+        
+        right = self.build_decision_tree(
+            X[right_mask], 
+            gradients[right_mask], 
+            hessians[right_mask], 
+            loss, lambda_, depth + 1)
         
         return GB_Node(feature=feature, threshold=threshold, left=left, right=right)
     
-    def fit(self, X, y, loss: GB_BaseLoss):
-        y_init = loss.init_prediction(y)
-        y_pred = np.full_like(y, y_init, dtype=float)
+    def fit(self, X, y, loss: GB_BaseLoss, lambda_=0, y_pred=None, get_pred=True):
+        if y_pred is None:
+            y_init = loss.init_prediction(y)
+            y_pred = np.full_like(y, y_init, dtype=float)
         
         gradients = loss.gradient(y, y_pred)
         hessians = loss.hessian(y, y_pred)
         
-        self.root = self.build_decision_tree(X, gradients, hessians, loss)
+        self.root = self.build_decision_tree(X, gradients, hessians, loss, lambda_)
         
+        if get_pred: 
+            return self.predict(X)
+                
     def _predict(self, x, node):
-        if node.value is not None:
-            return node.value
-        if x[node.feature] <= node.threshold:
-            return self._predict(x, node.left)
-        return self._predict(x, node.right)
+        while node.value is None:
+            if x[node.feature] <= node.threshold:
+                node = node.left
+            else:
+                node = node.right
+        return node.value
     
-    def predict(self, x):
-        return self._predict(x, self.root)
-    
+    def predict(self, X):
+        return np.array([self._predict(x, self.root) for x in X])
 
 class GradientBoosting:
-    pass
+    def __init__(self, loss, learning_rate: float):
+        self.loss = loss
+        self.learning_rate = learning_rate
+        self.trees = []
+        self.init_pred = None
+        
+    def fit(self, X, y, n_trees, max_depth, min_samples, lambda_=0, check_every=None):
+        self.trees = []
+        self.init_pred = self.loss.init_prediction(y)
+        y_pred = np.full_like(y, self.init_pred, dtype=float)
+        
+        for i in range(n_trees):
+            tree = GB_DecisionTree(max_depth, min_samples)
+            new_pred = tree.fit(X, y, self.loss, lambda_, y_pred)
+            y_pred += self.learning_rate * new_pred
+            self.trees.append(tree)
+            
+            if i > 0 and check_every is not None and i % max(1, check_every) == 0:
+                print(f"{i:.3d} / {n_trees}")
+            
+    def predict(self, X):
+        y_pred = self.init_pred
+        y_pred = np.full(X.shape[0], self.init_pred)
+        
+        for tree in self.trees:
+            y_pred += self.learning_rate * tree.predict(X)
+            
+        return y_pred
+    
     
         

@@ -128,11 +128,11 @@ class RandomForest:
         idx = np.random.choice(n, size=n, replace=True)
         return X[idx], y[idx]
     
-    def fit(self, X, y, check_every=True):
+    def fit(self, X, y, check_every=None):
         self.forest = []
         for i in range(self.n_trees):
-            if i > 0 and check_every and i % max(1, self.n_trees // 10) == 0:
-                print(i)
+            if i > 0 and check_every is not None and i % max(1, check_every) == 0:
+                print(f"{i:.3d} / {self.n_trees}")
             
             Xb, yb = self.random_sample(X, y)
             tree = RandomDecisionTree(self.max_depth, self.min_samples)
@@ -147,7 +147,7 @@ class RandomForest:
     def predict_batch(self, X):
         return np.array([self.predict(x) for x in X])
     
-    def fit_with_validation(self, X, y, test_size=0.2, random_state=42, check_every=True):
+    def fit_with_validation(self, X, y, test_size=0.2, random_state=42, check_every=None):
         X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=test_size, random_state=random_state)
         
         self.fit(X_train, y_train, check_every=check_every)
