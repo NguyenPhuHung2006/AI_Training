@@ -21,25 +21,42 @@ def fillna_cat_cols(df, cat_cols):
     df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
     return df
 
+def add_total_spend(df):
+    df = df.copy()
+    df["TotalSpend"] = df[
+        ["RoomService","FoodCourt","ShoppingMall","Spa","VRDeck"]
+    ].sum(axis=1)
+    
+    df["NoSpend"] = (df["TotalSpend"] == 0).astype(int)
+    
+    return df
+
+def add_group(df_train, df_test):
+    df_train, df_test = df_train.copy(), df_test.copy()
+    train_group = df_train["PassengerId"].str.split("_").str[0]
+    test_group  = df_test["PassengerId"].str.split("_").str[0]
+
+    group_size = train_group.value_counts()
+
+    df_train["GroupSize"] = train_group.map(group_size)
+    df_test["GroupSize"]  = test_group.map(group_size).fillna(1)
+    
+    return df_train, df_test
+
 def read_data(train_path, test_path):
     df_train = pd.read_csv(train_path)
     df_test = pd.read_csv(test_path)
 
     passenger_id = df_test["PassengerId"]
-
-    # drop unnecessary columns
+    
+    df_train, df_test = add_group(df_train, df_test)
     drop_cols = ["PassengerId", "Name"]
     df_train = df_train.drop(columns=drop_cols)
-    df_test = df_test.drop(columns=drop_cols)
+    df_test  = df_test.drop(columns=drop_cols)
 
     # split cabin column
     df_train = split_cabin_column(df_train)
     df_test = split_cabin_column(df_test)
-    
-    # categorical columns
-    cat_cols = ["CryoSleep", "VIP", "HomePlanet", "Destination", "Deck", "Side"]
-    df_train = fillna_cat_cols(df_train, cat_cols)
-    df_test = fillna_cat_cols(df_test, cat_cols)
 
     # numerical columns
     num_cols = [
@@ -49,9 +66,21 @@ def read_data(train_path, test_path):
     num_medians = df_train[num_cols].median()
     df_train[num_cols] = df_train[num_cols].fillna(num_medians)
     df_test[num_cols] = df_test[num_cols].fillna(num_medians)
+    
+    df_train = add_total_spend(df_train)
+    df_test = add_total_spend(df_test)
 
+    # categorical columns
+    cat_cols = ["CryoSleep", "VIP", "HomePlanet", "Destination", "Deck", "Side"]
+    
     y_train = df_train["Transported"].to_numpy().astype(int)
     df_train = df_train.drop(columns="Transported")
+
+    full = pd.concat([df_train, df_test], axis=0)
+    full = fillna_cat_cols(full, cat_cols)
+
+    df_train = full.iloc[:len(y_train)]
+    df_test  = full.iloc[len(y_train):]
 
     df_train = df_train.reindex(columns=df_test.columns, fill_value=0)
 
