@@ -40,8 +40,6 @@ def add_features(df):
         (df["CryoSleep"] == False) & (df["NoSpend"] == 1)
     ).astype(int)
     
-    df["CabinNum_scaled"] = df["CabinNum"] / df["CabinNum"].max()
-    df["AgeBin"] = pd.cut(df["Age"], bins=[0,12,18,30,45,60,100], labels=False)
     return df
 
 def add_group(df_train, df_test):
@@ -79,7 +77,7 @@ def read_data(train_path, test_path):
     num_medians = df_train[num_cols].median()
     df_train[num_cols] = df_train[num_cols].fillna(num_medians)
     df_test[num_cols] = df_test[num_cols].fillna(num_medians)
-    
+        
     df_train = add_total_spend(df_train)
     df_test = add_total_spend(df_test)
     
@@ -102,18 +100,19 @@ def read_data(train_path, test_path):
 
     x_train = df_train.to_numpy().astype(float)
     x_test = df_test.to_numpy().astype(float)
-
+        
     return x_train, y_train, x_test, passenger_id
 
 class GB_Base(ABC):
     
     class Node:
-        def __init__(self, feature=None, threshold=None, left=None, right=None, value=None):
+        def __init__(self, feature=None, threshold=None, left=None, right=None, value=None, default_left=True):
             self.feature = feature
             self.threshold = threshold
             self.left = left
             self.right = right
             self.value = value
+            self.default_left = default_left
     
     def __init__(self, 
                  learning_rate: float, 
@@ -180,44 +179,84 @@ class GB_Base(ABC):
         return 0.5 * (left_score + right_score - parent_score) - self.gamma
     
     def compute_score(self, x, gradients, hessians):
-        sorted_idx = np.argsort(x)
-        x_sorted = x[sorted_idx]
-        g_sorted = gradients[sorted_idx]
-        h_sorted = hessians[sorted_idx]
+        
+        nan_mask = np.isnan(x)
+        not_nan_mask = ~nan_mask
+        
+        x_valid = x[not_nan_mask]
+        g_valid = gradients[not_nan_mask]
+        h_valid = hessians[not_nan_mask]
 
-        G_total = np.sum(g_sorted)
-        H_total = np.sum(h_sorted)
+        g_nan = gradients[nan_mask]
+        h_nan = hessians[nan_mask]
+
+        G_nan = np.sum(g_nan)
+        H_nan = np.sum(h_nan)
+
+        if len(x_valid) == 0:
+            return -float("inf"), None, True
+        
+        sorted_idx = np.argsort(x_valid)
+        x_sorted = x_valid[sorted_idx]
+        g_sorted = g_valid[sorted_idx]
+        h_sorted = h_valid[sorted_idx]
+
+        G_total = np.sum(g_sorted) + G_nan
+        H_total = np.sum(h_sorted) + H_nan
+        
+        G_valid_total = np.sum(g_sorted)
+        H_valid_total = np.sum(h_sorted)
 
         G_left = 0.0
         H_left = 0.0
 
         best_gain = -float("inf")
         best_threshold = None
+        best_default_left = True
         
         for i in range(len(x_sorted) - 1):
+
             G_left += g_sorted[i]
             H_left += h_sorted[i]
             
             if x_sorted[i] == x_sorted[i + 1]:
                 continue
-            
-            G_right = G_total - G_left
-            H_right = H_total - H_left
+
+            G_right = G_valid_total - G_left
+            H_right = H_valid_total - H_left
             
             if H_left < self.min_child_weight or H_right < self.min_child_weight:
-                continue
+                continue                    
             
-            gain = self.gain(
-                G_left, H_left, 
-                G_right, H_right, 
-                G_total, H_total 
+            gain_left = self.gain(
+                G_left + G_nan,
+                H_left + H_nan,
+                G_right,
+                H_right,
+                G_total,
+                H_total
             )
             
-            if gain > best_gain:
-                best_gain = gain
+            gain_right = self.gain(
+                G_left,
+                H_left,
+                G_right + G_nan,
+                H_right + H_nan,
+                G_total,
+                H_total
+            )
+
+            if gain_left > best_gain:
+                best_gain = gain_left
                 best_threshold = (x_sorted[i] + x_sorted[i + 1]) / 2
+                best_default_left = True
+
+            if gain_right > best_gain:
+                best_gain = gain_right
+                best_threshold = (x_sorted[i] + x_sorted[i + 1]) / 2
+                best_default_left = False
                 
-        return best_gain, best_threshold
+        return best_gain, best_threshold, best_default_left
     
     def get_random_indices(self, ratio, total_size, replace=False):
         size = max(1, int(ratio * total_size))
@@ -227,13 +266,14 @@ class GB_Base(ABC):
         best_feature = None
         best_threshold = None
         best_gain = -float("inf")
+        best_default_left = True
 
         n_features = X.shape[1]
         
         features = self.get_random_indices(self.sub_feature_size, n_features, replace=False)
 
         for feature in features:
-            gain, threshold = self.compute_score(
+            gain, threshold, default_left = self.compute_score(
                 X[:, feature], gradients, hessians
             )
 
@@ -241,22 +281,30 @@ class GB_Base(ABC):
                 best_gain = gain
                 best_feature = feature
                 best_threshold = threshold
+                best_default_left = default_left
 
-        return best_feature, best_threshold, best_gain
+        return best_feature, best_threshold, best_gain, best_default_left
     
     def build_decision_tree(self, X, gradients, hessians, depth=0):
         H = np.sum(hessians)
         if depth >= self.max_depth or H < self.min_child_weight:
             return self.Node(value=self.leaf_value(gradients, hessians))
         
-        feature, threshold, gain = self.best_split(X, gradients, hessians)
+        feature, threshold, gain, default_left = self.best_split(X, gradients, hessians)
         
         # in case there's a bug in the code
-        if feature is None or threshold is None or gain < 0:
+        if feature is None or threshold is None or gain <= 0:
             return self.Node(value=self.leaf_value(gradients, hessians))
         
         left_mask = X[:, feature] <= threshold
-        right_mask = ~left_mask
+        right_mask = X[:, feature] > threshold
+
+        nan_mask = np.isnan(X[:, feature])
+
+        if default_left:
+            left_mask = left_mask | nan_mask
+        else:
+            right_mask = right_mask | nan_mask
         
         if np.sum(left_mask) < self.min_samples_leaf or np.sum(right_mask) < self.min_samples_leaf:
             return self.Node(value=self.leaf_value(gradients, hessians))
@@ -275,14 +323,29 @@ class GB_Base(ABC):
             depth + 1
         )
         
-        return self.Node(feature=feature, threshold=threshold, left=left, right=right)
+        return self.Node(
+            feature=feature, 
+            threshold=threshold, 
+            left=left, 
+            right=right, 
+            default_left=default_left
+        )
     
     def _predict_tree(self, x, node: Node):
         while node.value is None:
-            if x[node.feature] <= node.threshold:
+            value = x[node.feature]
+
+            if np.isnan(value):
+                if node.default_left:
+                    node = node.left
+                else:
+                    node = node.right
+
+            elif value <= node.threshold:
                 node = node.left
             else:
                 node = node.right
+
         return node.value
     
     def predict_tree(self, X, node: Node):
