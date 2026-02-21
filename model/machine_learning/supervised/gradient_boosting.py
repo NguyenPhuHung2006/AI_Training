@@ -12,8 +12,7 @@ class GB_Base(ABC):
             self.right = right
             self.value = value
     
-    def __init__(self, loss, learning_rate: float, max_depth, min_child_weight, lambda_=0, gamma=0, n_trees=100):
-        self.loss = loss
+    def __init__(self, learning_rate: float, max_depth, min_child_weight, lambda_=0, gamma=0, n_trees=100):
         self.learning_rate = learning_rate
         self.max_depth = max_depth
         self.min_child_weight = min_child_weight
