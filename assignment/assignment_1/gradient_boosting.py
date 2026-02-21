@@ -31,6 +31,19 @@ def add_total_spend(df):
     
     return df
 
+def add_features(df):
+    df = df.copy()
+    df["SpendPerAge"] = df["TotalSpend"] / (df["Age"] + 1)
+    df["IsAlone"] = (df["GroupSize"] == 1).astype(int)
+    df["LuxurySpend"] = df["Spa"] + df["VRDeck"]
+    df["Cryo_NoSpend_Mismatch"] = (
+        (df["CryoSleep"] == False) & (df["NoSpend"] == 1)
+    ).astype(int)
+    
+    df["CabinNum_scaled"] = df["CabinNum"] / df["CabinNum"].max()
+    df["AgeBin"] = pd.cut(df["Age"], bins=[0,12,18,30,45,60,100], labels=False)
+    return df
+
 def add_group(df_train, df_test):
     df_train, df_test = df_train.copy(), df_test.copy()
     train_group = df_train["PassengerId"].str.split("_").str[0]
@@ -69,6 +82,9 @@ def read_data(train_path, test_path):
     
     df_train = add_total_spend(df_train)
     df_test = add_total_spend(df_test)
+    
+    df_train = add_features(df_train)
+    df_test = add_features(df_test)
 
     # categorical columns
     cat_cols = ["CryoSleep", "VIP", "HomePlanet", "Destination", "Deck", "Side"]
@@ -185,8 +201,16 @@ class GB_Base(ABC):
         best_gain = -float("inf")
 
         n_features = X.shape[1]
+        
+        # columns subsampling
+        colsample = 0.7
+        features = np.random.choice(
+            n_features,
+            int(colsample * n_features),
+            replace=False
+        )
 
-        for feature in range(n_features):
+        for feature in features:
             gain, threshold = self.compute_score(
                 X[:, feature], gradients, hessians, lambda_
             )
@@ -260,8 +284,20 @@ class GB_Base(ABC):
         for i in range(self.n_trees):
             gradients = self.gradient(y, y_pred)
             hessians = self.hessian(y, y_pred)
+            
+            # row subsampling
+            subsample = 0.7
+            idx = np.random.choice(
+                len(y),
+                int(subsample * len(y)),
+                replace=False
+            )
 
-            tree = self.build_decision_tree(X, gradients, hessians, self.lambda_)
+            X_sub = X[idx]
+            g_sub = gradients[idx]
+            h_sub = hessians[idx]
+
+            tree = self.build_decision_tree(X_sub, g_sub, h_sub, self.lambda_)
             update = self.predict_tree(X, tree)
             y_pred += self.learning_rate * update
             self.trees.append(tree)
@@ -300,8 +336,20 @@ class GB_Base(ABC):
 
             gradients = self.gradient(y_train, y_pred_train)
             hessians  = self.hessian(y_train, y_pred_train)
+            
+            # row subsampling
+            subsample = 0.7
+            idx = np.random.choice(
+                len(y_train),
+                int(subsample * len(y_train)),
+                replace=False
+            )
 
-            tree = self.build_decision_tree(X_train, gradients, hessians, self.lambda_)
+            X_sub = X_train[idx]
+            g_sub = gradients[idx]
+            h_sub = hessians[idx]
+
+            tree = self.build_decision_tree(X_sub, g_sub, h_sub, self.lambda_)
 
             train_update = self.predict_tree(X_train, tree)
             val_update   = self.predict_tree(X_val, tree)
@@ -418,16 +466,16 @@ def main():
     )
     
     model = GB_Classification(
-        learning_rate=0.1,
-        max_depth=3,
-        min_child_weight=1,
+        learning_rate=0.05,
+        max_depth=4,
+        min_child_weight=5,
         lambda_=1,
-        gamma=0.1,
-        n_trees=500
+        gamma=0.3,
+        n_trees=400
     )
 
-    # get_result(X_train, y_train, X_test, passenger_id, model)
-    get_validation(X_train, y_train, model)
+    get_result(X_train, y_train, X_test, passenger_id, model)
+    # get_validation(X_train, y_train, model)
 
 if __name__ == "__main__":
     main()
