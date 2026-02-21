@@ -50,7 +50,7 @@ class GB_Base(ABC):
         pass
     
     @abstractmethod
-    def leaf_value(self, gradients, hessians, lambda_):
+    def leaf_value(self, gradients, hessians):
         pass
     
     @abstractmethod
@@ -64,19 +64,19 @@ class GB_Base(ABC):
             return G + self.alpha
         return 0
     
-    def gain(self, G_left, H_left, G_right, H_right, G_total, H_total, lambda_, eps=1e-15):
+    def gain(self, G_left, H_left, G_right, H_right, G_total, H_total, eps=1e-15):
 
         GL = self.soft_threshold(G_left)
         GR = self.soft_threshold(G_right)
         GP = self.soft_threshold(G_total)
 
-        left_score = (GL ** 2) / (H_left + lambda_ + eps)
-        right_score = (GR ** 2) / (H_right + lambda_ + eps)
-        parent_score = (GP ** 2) / (H_total + lambda_ + eps)
+        left_score = (GL ** 2) / (H_left + self.lambda_ + eps)
+        right_score = (GR ** 2) / (H_right + self.lambda_ + eps)
+        parent_score = (GP ** 2) / (H_total + self.lambda_ + eps)
 
         return 0.5 * (left_score + right_score - parent_score) - self.gamma
     
-    def compute_score(self, x, gradients, hessians, lambda_):
+    def compute_score(self, x, gradients, hessians):
         sorted_idx = np.argsort(x)
         x_sorted = x[sorted_idx]
         g_sorted = gradients[sorted_idx]
@@ -107,8 +107,7 @@ class GB_Base(ABC):
             gain = self.gain(
                 G_left, H_left, 
                 G_right, H_right, 
-                G_total, H_total, 
-                lambda_
+                G_total, H_total 
             )
             
             if gain > best_gain:
@@ -121,7 +120,7 @@ class GB_Base(ABC):
         size = max(1, int(ratio * total_size))
         return np.random.choice(total_size, size, replace=replace)
     
-    def best_split(self, X, gradients, hessians, lambda_):
+    def best_split(self, X, gradients, hessians):
         best_feature = None
         best_threshold = None
         best_gain = -float("inf")
@@ -132,7 +131,7 @@ class GB_Base(ABC):
 
         for feature in features:
             gain, threshold = self.compute_score(
-                X[:, feature], gradients, hessians, lambda_
+                X[:, feature], gradients, hessians
             )
 
             if gain > best_gain:
@@ -142,28 +141,27 @@ class GB_Base(ABC):
 
         return best_feature, best_threshold, best_gain
     
-    def build_decision_tree(self, X, gradients, hessians, lambda_, depth=0):
+    def build_decision_tree(self, X, gradients, hessians, depth=0):
         H = np.sum(hessians)
         if depth >= self.max_depth or H < self.min_child_weight:
-            return self.Node(value=self.leaf_value(gradients, hessians, lambda_))
+            return self.Node(value=self.leaf_value(gradients, hessians))
         
-        feature, threshold, gain = self.best_split(X, gradients, hessians, lambda_)
+        feature, threshold, gain = self.best_split(X, gradients, hessians)
         
         # in case there's a bug in the code
         if feature is None or threshold is None or gain < 0:
-            return self.Node(value=self.leaf_value(gradients, hessians, lambda_))
+            return self.Node(value=self.leaf_value(gradients, hessians))
         
         left_mask = X[:, feature] <= threshold
         right_mask = ~left_mask
         
         if np.sum(left_mask) < self.min_samples_leaf or np.sum(right_mask) < self.min_samples_leaf:
-            return self.Node(value=self.leaf_value(gradients, hessians, lambda_))
+            return self.Node(value=self.leaf_value(gradients, hessians))
         
         left = self.build_decision_tree(
             X[left_mask], 
             gradients[left_mask], 
             hessians[left_mask], 
-            lambda_, 
             depth + 1
         )
         
@@ -171,7 +169,6 @@ class GB_Base(ABC):
             X[right_mask], 
             gradients[right_mask], 
             hessians[right_mask], 
-            lambda_, 
             depth + 1
         )
         
@@ -211,7 +208,7 @@ class GB_Base(ABC):
             g_sub = gradients[idx]
             h_sub = hessians[idx]
 
-            tree = self.build_decision_tree(X_sub, g_sub, h_sub, self.lambda_)
+            tree = self.build_decision_tree(X_sub, g_sub, h_sub)
             update = self.predict_tree(X, tree)
             y_pred += self.learning_rate * update
             self.trees.append(tree)
@@ -257,7 +254,7 @@ class GB_Base(ABC):
             g_sub = gradients[idx]
             h_sub = hessians[idx]
 
-            tree = self.build_decision_tree(X_sub, g_sub, h_sub, self.lambda_)
+            tree = self.build_decision_tree(X_sub, g_sub, h_sub)
 
             train_update = self.predict_tree(X_train, tree)
             val_update   = self.predict_tree(X_val, tree)
@@ -304,10 +301,10 @@ class GB_Regression(GB_Base):
     def hessian(self, y, y_pred):
         return np.ones_like(y)
 
-    def leaf_value(self, gradients, hessians, lambda_):
+    def leaf_value(self, gradients, hessians):
         H = np.sum(hessians)
         G = np.sum(gradients)
-        return - super().soft_threshold(G) / (H + lambda_)
+        return - super().soft_threshold(G) / (H + self.lambda_)
     
     def evaluate(self, y, y_pred):
         return 0.5 * np.mean((y - y_pred)**2)
@@ -332,10 +329,10 @@ class GB_Classification(GB_Base):
         p = self.sigmoid(y_pred)
         return p * (1 - p)
 
-    def leaf_value(self, gradients, hessians, lambda_):
+    def leaf_value(self, gradients, hessians):
         H = np.sum(hessians)
         G = np.sum(gradients)
-        return - super().soft_threshold(G) / (H + lambda_)
+        return - super().soft_threshold(G) / (H + self.lambda_)
     
     def predict_label(self, X):
         y_pred = super().predict(X)

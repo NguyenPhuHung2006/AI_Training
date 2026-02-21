@@ -153,7 +153,7 @@ class GB_Base(ABC):
         pass
     
     @abstractmethod
-    def leaf_value(self, gradients, hessians, lambda_):
+    def leaf_value(self, gradients, hessians):
         pass
     
     @abstractmethod
@@ -247,19 +247,19 @@ class GB_Base(ABC):
     def build_decision_tree(self, X, gradients, hessians, depth=0):
         H = np.sum(hessians)
         if depth >= self.max_depth or H < self.min_child_weight:
-            return self.Node(value=self.leaf_value(gradients, hessians, self.lambda_))
+            return self.Node(value=self.leaf_value(gradients, hessians))
         
         feature, threshold, gain = self.best_split(X, gradients, hessians)
         
         # in case there's a bug in the code
         if feature is None or threshold is None or gain < 0:
-            return self.Node(value=self.leaf_value(gradients, hessians, self.lambda_))
+            return self.Node(value=self.leaf_value(gradients, hessians))
         
         left_mask = X[:, feature] <= threshold
         right_mask = ~left_mask
         
         if np.sum(left_mask) < self.min_samples_leaf or np.sum(right_mask) < self.min_samples_leaf:
-            return self.Node(value=self.leaf_value(gradients, hessians, self.lambda_))
+            return self.Node(value=self.leaf_value(gradients, hessians))
         
         left = self.build_decision_tree(
             X[left_mask], 
@@ -404,10 +404,10 @@ class GB_Regression(GB_Base):
     def hessian(self, y, y_pred):
         return np.ones_like(y)
 
-    def leaf_value(self, gradients, hessians, lambda_):
+    def leaf_value(self, gradients, hessians):
         H = np.sum(hessians)
         G = np.sum(gradients)
-        return - super().soft_threshold(G) / (H + lambda_)
+        return - super().soft_threshold(G) / (H + self.lambda_)
     
     def evaluate(self, y, y_pred):
         return 0.5 * np.mean((y - y_pred)**2)
@@ -432,10 +432,10 @@ class GB_Classification(GB_Base):
         p = self.sigmoid(y_pred)
         return p * (1 - p)
 
-    def leaf_value(self, gradients, hessians, lambda_):
+    def leaf_value(self, gradients, hessians):
         H = np.sum(hessians)
         G = np.sum(gradients)
-        return - super().soft_threshold(G) / (H + lambda_)
+        return - super().soft_threshold(G) / (H + self.lambda_)
     
     def predict_label(self, X):
         y_pred = super().predict(X)
