@@ -115,12 +115,27 @@ class GB_Base(ABC):
             self.right = right
             self.value = value
     
-    def __init__(self, learning_rate: float, max_depth, min_child_weight, lambda_=0, gamma=0, n_trees=100):
+    def __init__(self, 
+                 learning_rate: float, 
+                 max_depth, 
+                 min_child_weight, 
+                 min_samples_leaf, 
+                 sub_sample_size=0.8,
+                 sub_feature_size=0.8,
+                 lambda_=0, 
+                 gamma=0, 
+                 alpha=0, 
+                 n_trees=100
+                ):
         self.learning_rate = learning_rate
         self.max_depth = max_depth
         self.min_child_weight = min_child_weight
+        self.min_samples_leaf = min_samples_leaf
+        self.sub_sample_size = sub_sample_size
+        self.sub_feature_size = sub_feature_size
         self.lambda_ = lambda_
         self.gamma = gamma
+        self.alpha = alpha
         self.n_trees = n_trees
         self.trees = []
         self.init_pred = None
@@ -145,11 +160,22 @@ class GB_Base(ABC):
     def evaluate(self, y, y_pred):
         pass
     
+    def soft_threshold(self, G):
+        if G > self.alpha:
+            return G - self.alpha
+        elif G < -self.alpha:
+            return G + self.alpha
+        return 0
+    
     def gain(self, G_left, H_left, G_right, H_right, G_total, H_total, lambda_, eps=1e-15):
 
-        left_score = (G_left ** 2) / (H_left + lambda_ + eps)
-        right_score = (G_right ** 2) / (H_right + lambda_ + eps)
-        parent_score = (G_total ** 2) / (H_total + lambda_ + eps)
+        GL = self.soft_threshold(G_left)
+        GR = self.soft_threshold(G_right)
+        GP = self.soft_threshold(G_total)
+
+        left_score = (GL ** 2) / (H_left + lambda_ + eps)
+        right_score = (GR ** 2) / (H_right + lambda_ + eps)
+        parent_score = (GP ** 2) / (H_total + lambda_ + eps)
 
         return 0.5 * (left_score + right_score - parent_score) - self.gamma
     
@@ -193,7 +219,10 @@ class GB_Base(ABC):
                 best_threshold = (x_sorted[i] + x_sorted[i + 1]) / 2
                 
         return best_gain, best_threshold
-
+    
+    def get_random_indices(self, ratio, total_size, replace=False):
+        size = max(1, int(ratio * total_size))
+        return np.random.choice(total_size, size, replace=replace)
     
     def best_split(self, X, gradients, hessians, lambda_):
         best_feature = None
@@ -202,13 +231,7 @@ class GB_Base(ABC):
 
         n_features = X.shape[1]
         
-        # columns subsampling
-        colsample = 0.7
-        features = np.random.choice(
-            n_features,
-            int(colsample * n_features),
-            replace=False
-        )
+        features = self.get_random_indices(self.sub_feature_size, n_features, replace=False)
 
         for feature in features:
             gain, threshold = self.compute_score(
@@ -236,7 +259,7 @@ class GB_Base(ABC):
         left_mask = X[:, feature] <= threshold
         right_mask = ~left_mask
         
-        if np.sum(left_mask) == 0 or np.sum(right_mask) == 0:
+        if np.sum(left_mask) < self.min_samples_leaf or np.sum(right_mask) < self.min_samples_leaf:
             return self.Node(value=self.leaf_value(gradients, hessians, lambda_))
         
         left = self.build_decision_tree(
@@ -285,13 +308,7 @@ class GB_Base(ABC):
             gradients = self.gradient(y, y_pred)
             hessians = self.hessian(y, y_pred)
             
-            # row subsampling
-            subsample = 0.7
-            idx = np.random.choice(
-                len(y),
-                int(subsample * len(y)),
-                replace=False
-            )
+            idx = self.get_random_indices(self.sub_sample_size, len(y), replace=False)
 
             X_sub = X[idx]
             g_sub = gradients[idx]
@@ -337,13 +354,7 @@ class GB_Base(ABC):
             gradients = self.gradient(y_train, y_pred_train)
             hessians  = self.hessian(y_train, y_pred_train)
             
-            # row subsampling
-            subsample = 0.7
-            idx = np.random.choice(
-                len(y_train),
-                int(subsample * len(y_train)),
-                replace=False
-            )
+            idx = self.get_random_indices(self.sub_sample_size, len(y_train), replace=False)
 
             X_sub = X_train[idx]
             g_sub = gradients[idx]
@@ -398,9 +409,8 @@ class GB_Regression(GB_Base):
 
     def leaf_value(self, gradients, hessians, lambda_):
         H = np.sum(hessians)
-        if H < 1e-6:
-            H = 1e-6
-        return - np.sum(gradients) / (H + lambda_)
+        G = np.sum(gradients)
+        return - super().soft_threshold(G) / (H + lambda_)
     
     def evaluate(self, y, y_pred):
         return 0.5 * np.mean((y - y_pred)**2)
@@ -427,9 +437,8 @@ class GB_Classification(GB_Base):
 
     def leaf_value(self, gradients, hessians, lambda_):
         H = np.sum(hessians)
-        if H < 1e-6:
-            H = 1e-6
-        return - np.sum(gradients) / (H + lambda_)
+        G = np.sum(gradients)
+        return - super().soft_threshold(G) / (H + lambda_)
     
     def predict_label(self, X):
         y_pred = super().predict(X)
@@ -448,7 +457,7 @@ def get_validation(X_train, y_train, model):
 
 def get_result(X_train, y_train, X_test, passenger_id, model):
     
-    model.fit(X_train, y_train, print_every=10)
+    model.fit(X_train, y_train, print_every=1)
         
     y_predict = model.predict_label(X_test).astype(bool)
 
@@ -466,16 +475,20 @@ def main():
     )
     
     model = GB_Classification(
-        learning_rate=0.05,
-        max_depth=4,
-        min_child_weight=5,
-        lambda_=1,
-        gamma=0.3,
+        learning_rate=0.03,
+        max_depth=5,
+        min_child_weight=3,
+        min_samples_leaf=1,
+        sub_feature_size=0.8,
+        sub_sample_size=0.8,
+        lambda_=0,
+        gamma=0.1,
+        alpha=0,
         n_trees=400
     )
 
-    get_result(X_train, y_train, X_test, passenger_id, model)
-    # get_validation(X_train, y_train, model)
+    # get_result(X_train, y_train, X_test, passenger_id, model)
+    get_validation(X_train, y_train, model)
 
 if __name__ == "__main__":
     main()

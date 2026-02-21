@@ -12,12 +12,27 @@ class GB_Base(ABC):
             self.right = right
             self.value = value
     
-    def __init__(self, learning_rate: float, max_depth, min_child_weight, lambda_=0, gamma=0, n_trees=100):
+    def __init__(self, 
+                 learning_rate: float, 
+                 max_depth, 
+                 min_child_weight, 
+                 min_samples_leaf, 
+                 sub_sample_size=0.8,
+                 sub_feature_size=0.8,
+                 lambda_=0, 
+                 gamma=0, 
+                 alpha=0, 
+                 n_trees=100
+                ):
         self.learning_rate = learning_rate
         self.max_depth = max_depth
         self.min_child_weight = min_child_weight
+        self.min_samples_leaf = min_samples_leaf
+        self.sub_sample_size = sub_sample_size
+        self.sub_feature_size = sub_feature_size
         self.lambda_ = lambda_
         self.gamma = gamma
+        self.alpha = alpha
         self.n_trees = n_trees
         self.trees = []
         self.init_pred = None
@@ -42,11 +57,22 @@ class GB_Base(ABC):
     def evaluate(self, y, y_pred):
         pass
     
+    def soft_threshold(self, G):
+        if G > self.alpha:
+            return G - self.alpha
+        elif G < -self.alpha:
+            return G + self.alpha
+        return 0
+    
     def gain(self, G_left, H_left, G_right, H_right, G_total, H_total, lambda_, eps=1e-15):
 
-        left_score = (G_left ** 2) / (H_left + lambda_ + eps)
-        right_score = (G_right ** 2) / (H_right + lambda_ + eps)
-        parent_score = (G_total ** 2) / (H_total + lambda_ + eps)
+        GL = self.soft_threshold(G_left)
+        GR = self.soft_threshold(G_right)
+        GP = self.soft_threshold(G_total)
+
+        left_score = (GL ** 2) / (H_left + lambda_ + eps)
+        right_score = (GR ** 2) / (H_right + lambda_ + eps)
+        parent_score = (GP ** 2) / (H_total + lambda_ + eps)
 
         return 0.5 * (left_score + right_score - parent_score) - self.gamma
     
@@ -90,7 +116,10 @@ class GB_Base(ABC):
                 best_threshold = (x_sorted[i] + x_sorted[i + 1]) / 2
                 
         return best_gain, best_threshold
-
+    
+    def get_random_indices(self, ratio, total_size, replace=False):
+        size = max(1, int(ratio * total_size))
+        return np.random.choice(total_size, size, replace=replace)
     
     def best_split(self, X, gradients, hessians, lambda_):
         best_feature = None
@@ -98,8 +127,10 @@ class GB_Base(ABC):
         best_gain = -float("inf")
 
         n_features = X.shape[1]
+        
+        features = self.get_random_indices(self.sub_feature_size, n_features, replace=False)
 
-        for feature in range(n_features):
+        for feature in features:
             gain, threshold = self.compute_score(
                 X[:, feature], gradients, hessians, lambda_
             )
@@ -125,7 +156,7 @@ class GB_Base(ABC):
         left_mask = X[:, feature] <= threshold
         right_mask = ~left_mask
         
-        if np.sum(left_mask) == 0 or np.sum(right_mask) == 0:
+        if np.sum(left_mask) < self.min_samples_leaf or np.sum(right_mask) < self.min_samples_leaf:
             return self.Node(value=self.leaf_value(gradients, hessians, lambda_))
         
         left = self.build_decision_tree(
@@ -173,8 +204,14 @@ class GB_Base(ABC):
         for i in range(self.n_trees):
             gradients = self.gradient(y, y_pred)
             hessians = self.hessian(y, y_pred)
+            
+            idx = self.get_random_indices(self.sub_sample_size, len(y), replace=False)
 
-            tree = self.build_decision_tree(X, gradients, hessians, self.lambda_)
+            X_sub = X[idx]
+            g_sub = gradients[idx]
+            h_sub = hessians[idx]
+
+            tree = self.build_decision_tree(X_sub, g_sub, h_sub, self.lambda_)
             update = self.predict_tree(X, tree)
             y_pred += self.learning_rate * update
             self.trees.append(tree)
@@ -213,8 +250,14 @@ class GB_Base(ABC):
 
             gradients = self.gradient(y_train, y_pred_train)
             hessians  = self.hessian(y_train, y_pred_train)
+            
+            idx = self.get_random_indices(self.sub_sample_size, len(y_train), replace=False)
 
-            tree = self.build_decision_tree(X_train, gradients, hessians, self.lambda_)
+            X_sub = X_train[idx]
+            g_sub = gradients[idx]
+            h_sub = hessians[idx]
+
+            tree = self.build_decision_tree(X_sub, g_sub, h_sub, self.lambda_)
 
             train_update = self.predict_tree(X_train, tree)
             val_update   = self.predict_tree(X_val, tree)
@@ -263,9 +306,8 @@ class GB_Regression(GB_Base):
 
     def leaf_value(self, gradients, hessians, lambda_):
         H = np.sum(hessians)
-        if H < 1e-6:
-            H = 1e-6
-        return - np.sum(gradients) / (H + lambda_)
+        G = np.sum(gradients)
+        return - super().soft_threshold(G) / (H + lambda_)
     
     def evaluate(self, y, y_pred):
         return 0.5 * np.mean((y - y_pred)**2)
@@ -292,9 +334,8 @@ class GB_Classification(GB_Base):
 
     def leaf_value(self, gradients, hessians, lambda_):
         H = np.sum(hessians)
-        if H < 1e-6:
-            H = 1e-6
-        return - np.sum(gradients) / (H + lambda_)
+        G = np.sum(gradients)
+        return - super().soft_threshold(G) / (H + lambda_)
     
     def predict_label(self, X):
         y_pred = super().predict(X)
