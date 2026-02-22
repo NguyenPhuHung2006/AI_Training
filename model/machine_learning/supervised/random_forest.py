@@ -140,6 +140,13 @@ class RandomForest:
             
             self.forest.append(tree)
             
+    def predict_prob(self, x):
+        probs = [tree.predict(x) for tree in self.forest]
+        return np.mean(probs)
+    
+    def predict_batch_prob(self, X):
+        return np.array([self.predict_prob(x) for x in X])
+            
     def predict(self, x):
         votes = [tree.predict(x) for tree in self.forest]
         return Counter(votes).most_common(1)[0][0].astype(bool)

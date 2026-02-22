@@ -400,9 +400,12 @@ class GB_Classification(GB_Base):
         return - super().soft_threshold(G) / (H + self.lambda_)
     
     def predict_label(self, X):
+        probs = self.predict_prob(X)
+        return (probs >= 0.5).astype(int)
+    
+    def predict_prob(self, X):
         y_pred = super().predict(X)
-        proba = self.sigmoid(y_pred)
-        return (proba >= 0.5).astype(int)
+        return self.sigmoid(y_pred)
     
     def evaluate(self, y, y_pred):
         p = self.sigmoid(y_pred)
