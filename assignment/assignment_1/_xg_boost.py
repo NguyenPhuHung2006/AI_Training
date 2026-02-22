@@ -124,7 +124,7 @@ def get_validation(X_train, y_train, model):
     )
     
 # conda activate base
-# >> python _xg_boost.py
+# python _xg_boost.py
 
 def main():
     X_train, y_train, X_test, passenger_id = read_data(
