@@ -2,53 +2,49 @@ import numpy as np
 import time
                 
 def get_valid_columns(board):
-    valid_cols = set()
-    n_cols = len(board[0])
-    for i in range(n_cols):
-        if board[0, i] == 0:
-            valid_cols.add(i)
-    return valid_cols
+    return {i for i, val in enumerate(board[0]) if val == 0}
 
 def drop_piece(board, action, mark, in_place=True):
     if not in_place:
         board = board.copy()
-    n_rows = len(board)
-    for i in range(n_rows):
-        if i + 1 >= n_rows or (i + 1 < n_rows and board[i + 1, action] != 0):
-            board[i, action] = mark
-            return board
-    return board
+    n_rows = board.shape[0]
 
-def check_win(board, mark, inarow):
-    rows = len(board)
-    cols = len(board[0])
+    for row in range(n_rows - 1, -1, -1):   
+        if board[row, action] == 0:
+            board[row, action] = mark
+            return board, row
+    return board, None
+
+def check_win(board, row, col, mark, inarow):
+    n_rows = len(board)
+    n_cols = len(board[0])
 
     directions = [
-        (0, 1),   # horizontal →
-        (1, 0),   # vertical ↓
-        (1, 1),   # diagonal ↘
-        (1, -1)   # diagonal ↙
+        (0, 1),   # horizontal
+        (1, 0),   # vertical
+        (1, 1),   # diag ↘
+        (1, -1)   # diag ↙
     ]
 
-    for r in range(rows):
-        for c in range(cols):
-            if board[r, c] != mark:
-                continue
+    for dr, dc in directions:
+        count = 1  
 
-            for dr, dc in directions:
-                count = 0
-                rr, cc = r, c
+        # forward direction
+        rr, cc = row + dr, col + dc
+        while 0 <= rr < n_rows and 0 <= cc < n_cols and board[rr][cc] == mark:
+            count += 1
+            rr += dr
+            cc += dc
 
-                while (
-                    0 <= rr < rows and
-                    0 <= cc < cols and
-                    board[rr, cc] == mark
-                ):
-                    count += 1
-                    if count == inarow:
-                        return True
-                    rr += dr
-                    cc += dc
+        # backward direction
+        rr, cc = row - dr, col - dc
+        while 0 <= rr < n_rows and 0 <= cc < n_cols and board[rr][cc] == mark:
+            count += 1
+            rr -= dr
+            cc -= dc
+
+        if count >= inarow:
+            return True
 
     return False
 
@@ -103,8 +99,8 @@ def get_opponent_mark(mark):
 
 def immediate_move(board, mark, inarow, valid_cols):
     for col in valid_cols:
-        temp = drop_piece(board, col, mark, in_place=False)
-        if check_win(temp, mark, inarow):
+        temp, row = drop_piece(board, col, mark, in_place=False)
+        if check_win(temp, row, col, mark, inarow):
             return col
     return None
 
@@ -132,16 +128,20 @@ def roll_out(board, mark, inarow, my_mark, opponent_mark):
         if opp_mark_cols is not None:
             return get_delta(opp_mark, my_mark, opponent_mark)
         
-        drop_piece(board, center_bias(valid_cols, board.shape[1]), mark)
-        if check_win(board, mark, inarow):
+        col = center_bias(valid_cols, board.shape[1])
+        _, row = drop_piece(board, col, mark)
+        if check_win(board, row, col, mark, inarow):
             return get_delta(mark, my_mark, opponent_mark)
         
         valid_cols = get_valid_columns(board)
         if not valid_cols:
             return 0
-        drop_piece(board, center_bias(valid_cols, board.shape[1]), opp_mark)
-        if check_win(board, opp_mark, inarow):
+        col = center_bias(valid_cols, board.shape[1])
+        _, row = drop_piece(board, col, mark)
+        if check_win(board, row, col, opp_mark, inarow):
             return get_delta(opp_mark, my_mark, opponent_mark)
+        
+        valid_cols = get_valid_columns(board)
         
     return 0
 
@@ -165,7 +165,7 @@ def dfs(node: Node, board, mark, c, my_mark, opponent_mark, inarow, table):
     if child_cols:
         child_cols = center_bias(child_cols, board.shape[1])
         
-        next_board = drop_piece(board, child_cols, mark, in_place=False)
+        next_board, _ = drop_piece(board, child_cols, mark, in_place=False)
         board_hash = tuple(next_board.flatten())
         
         if board_hash in table:
