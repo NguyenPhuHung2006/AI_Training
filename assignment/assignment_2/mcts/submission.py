@@ -116,9 +116,12 @@ def center_bias(cols, n_cols):
     return min(cols, key=lambda c: abs(c - center))
 
 def roll_out(board, mark, inarow, my_mark, opponent_mark):
+    n_rows = board.shape[0]
     opp_mark = get_opponent_mark(mark)
-    valid_cols = get_valid_columns(board)
-    while valid_cols:
+    heights = np.sum(board != 0, axis=0)
+    valid_cols = np.where(heights < n_rows)[0]
+    
+    while valid_cols.size > 0:
         
         cur_mark_cols = immediate_move(board, mark, inarow, valid_cols)
         if cur_mark_cols is not None:
@@ -130,18 +133,20 @@ def roll_out(board, mark, inarow, my_mark, opponent_mark):
         
         col = center_bias(valid_cols, board.shape[1])
         _, row = drop_piece(board, col, mark)
+        heights[col] += 1
         if check_win(board, row, col, mark, inarow):
             return get_delta(mark, my_mark, opponent_mark)
         
-        valid_cols = get_valid_columns(board)
-        if not valid_cols:
+        valid_cols = np.where(heights < n_rows)[0]
+        if valid_cols.size == 0:
             return 0
         col = center_bias(valid_cols, board.shape[1])
-        _, row = drop_piece(board, col, mark)
+        _, row = drop_piece(board, col, opp_mark)
+        heights[col] += 1
         if check_win(board, row, col, opp_mark, inarow):
             return get_delta(opp_mark, my_mark, opponent_mark)
         
-        valid_cols = get_valid_columns(board)
+        valid_cols = np.where(heights < n_rows)[0]
         
     return 0
 
@@ -166,7 +171,7 @@ def dfs(node: Node, board, mark, c, my_mark, opponent_mark, inarow, table):
         child_cols = center_bias(child_cols, board.shape[1])
         
         next_board, _ = drop_piece(board, child_cols, mark, in_place=False)
-        board_hash = tuple(next_board.flatten())
+        board_hash = next_board.tobytes()
         
         if board_hash in table:
             child_node = table[board_hash]
