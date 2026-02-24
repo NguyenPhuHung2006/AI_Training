@@ -1,5 +1,5 @@
 from kaggle_environments import make
-from mcts.submission import act
+from mcts.submission_bitboard import act
 import traceback
 
 env = make("connectx", debug=True)

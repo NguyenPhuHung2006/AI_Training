@@ -3,10 +3,12 @@ import time
 import random
 
 class Node:
-    def __init__(self):
+    def __init__(self, n_cols=7):
         self.n_visits = 0
         self.n_wins = 0
         self.children = {}
+        self.valid_moves = {}
+        self.untried_moves = {cols for cols in range(n_cols)}
         
     def compute_uct(self, c, n_prev_visits):
         if self.n_visits == 0:
@@ -17,7 +19,7 @@ class Node:
         node = None
         max_uct = -np.inf
         max_col = None
-        for col, child in enumerate(self.children):
+        for col, child in self.children.items():
             if child is None:
                 continue
             uct = child.compute_uct(c, self.n_visits)
@@ -31,7 +33,7 @@ class Node:
     def get_max_visit(self):
         max_visit = -np.inf
         max_cols = None
-        for cols, child in enumerate(self.children):
+        for cols, child in self.children.items():
             if child is None:
                 continue
             if child.n_visits > max_visit:
@@ -82,6 +84,10 @@ def play_move(board_mask, player, col, bottom_mask):
 
 def get_opponent_mask(board_mask, player):
     return board_mask ^ player
+
+def center_bias(cols, n_cols):
+    center = n_cols // 2
+    return min(cols, key=lambda c: abs(c - center))
     
 def avoid_losing_moves(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow):
     safe_moves = []
@@ -110,8 +116,30 @@ def avoid_losing_moves(board_mask, player, top_mask, bottom_mask, n_rows, n_cols
             
     return safe_moves
 
-def roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow):
+def immediate_win(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow):
+    for col in range(n_cols):
+        if not can_play(board_mask, col, top_mask):
+            continue
+        
+        _, next_player = play_move(board_mask, player, col, bottom_mask)
+        
+        if is_win(next_player, n_rows, inarow):
+            return col
+    return None
+
+def find_opponent_col(board_mask, prev_board_mask, n_rows):
+    move = board_mask ^ prev_board_mask
     
+    if move == 0:
+        return None
+    
+    bit_index = move.bit_length() - 1
+    
+    col = bit_index // n_rows
+    
+    return col
+
+def roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow):
     current = player
     B = board_mask
     is_winning = True
@@ -121,8 +149,19 @@ def roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow):
         
         if not valid:
             return 0
-
-        col = random.choice(valid)
+        
+        opponent = get_opponent_mask(B, current)
+        win_move = immediate_win(B, current, top_mask, bottom_mask, n_rows, n_cols, inarow)
+        block_move = immediate_win(B, opponent, top_mask, bottom_mask, n_rows, n_cols, inarow)
+        col = None
+        
+        if block_move is not None:
+            col = block_move
+        if win_move is not None:
+            col = win_move
+        if col is None:
+            col = random.choice(valid)
+    
         B, current = play_move(B, current, col, bottom_mask)
         
         if is_win(current, n_rows, inarow):
@@ -131,25 +170,66 @@ def roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow):
         current = get_opponent_mask(B, current)
         is_winning ^= 1
         
-def dfs(node: Node, board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow, table):
-    
+def dfs(node: Node, c, board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow, table):
     if node.n_visits == 0:
         node.n_visits = 1
         result = roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow)
         node.n_wins += result
+        node.valid_moves = {c for c in range(n_cols) if can_play(board_mask, c, top_mask)}
         return result
     
-    node.n_visits += 1
     opponent = get_opponent_mask(board_mask, player)
-    valid_moves = None
-            
+    node.n_visits += 1    
+    next_cols = node.valid_moves & node.untried_moves
+    child = None
+    next_col = None
     
+    if next_cols:
+        next_col = center_bias(next_cols, n_cols)
+        
+        next_board_mask, next_player = play_move(board_mask, player, next_col, bottom_mask)
+        board_hash = (next_board_mask, next_player)
+        
+        if board_hash in table:
+            child = table[board_hash]
+        else:
+            child = Node(n_cols)
+            table[board_hash] = child
             
+        node.untried_moves.discard(next_col)
+        node.children[next_col] = child
+    else:
+        child, next_col = node.get_max_uct(c)
+        
+    # the board is full
+    if child is None or next_col is None:
+        if is_win(player, n_rows, inarow):
+            return 1
+        if is_win(opponent, n_rows, inarow):
+            return -1
+        return 0
+    
+    next_board_mask, _ = play_move(board_mask, player, next_col, bottom_mask)
+    
+    result = -dfs(
+        child, 
+        c, 
+        next_board_mask,
+        opponent,
+        top_mask,
+        bottom_mask,
+        n_rows,
+        n_cols,
+        inarow,
+        table    
+    )
+    
+    node.n_wins += result
 
-    
+    return result
     
 root = None
-prev_board = None
+prev_board_mask = 0
 table = None
 def act(observation, configuration):
     n_rows = configuration.rows
@@ -158,12 +238,50 @@ def act(observation, configuration):
     board = observation.board
     my_mark = observation.mark
             
-    board_mask, player = convert_bitboard(board, my_mark)
+    board_mask, player = convert_bitboard(board, my_mark, n_rows, n_cols)
     
-    top_mask = ((1 << c * (n_rows + 1)) for c in range(n_cols))
-    bottom_mask = ((1 << (c * (n_rows + 1) + n_rows - 1)) for c in range(n_cols))
+    top_mask = [(1 << c * (n_rows + 1)) for c in range(n_cols)]
+    bottom_mask = [(1 << (c * (n_rows + 1) + n_rows - 1)) for c in range(n_cols)]
     
+    global root, prev_board_mask, table
+    if not root:
+        root = Node(n_cols)  
+        table = {}
+    if prev_board_mask > 0:
+        opponent_col = find_opponent_col(board_mask, prev_board_mask, n_rows)
+        if opponent_col is not None and root.children[opponent_col]:
+            root = root.children[opponent_col]
+        else:
+            root = Node(n_cols)
+            
+    # board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow
+    opponent = get_opponent_mask(board_mask, player)
+    win_move = immediate_win(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow)
+    block_move = immediate_win(board_mask, opponent, top_mask, bottom_mask, n_rows, n_cols, inarow)
     
+    immediate_move = None
+    if block_move:
+        immediate_move = block_move
+    if win_move:
+        immediate_move = win_move
+            
+    if immediate_move is not None:
+        if root.children[immediate_move]:
+            root = root.children[immediate_move]
+        else:
+            root = Node(n_cols)
+
+        prev_board_mask = board_mask
+        return immediate_move
     
+    c = 1.36
+    start = time.time()
+    while time.time() - start < 1.8:
+        dfs(root, c, board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow, table)
     
+    next_col = root.get_max_visit()
+    root = root.children[next_col]
+    prev_board_mask = board_mask
+    return next_col    
+        
     
