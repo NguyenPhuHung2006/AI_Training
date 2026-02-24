@@ -48,7 +48,7 @@ def convert_bitboard(board, my_mark, n_rows, n_cols):
     for col in range(n_cols):
         for row in range(n_rows):
             bit_index = row + col * (n_rows + 1)
-            cell = board[row * n_cols + col]
+            cell = board[col + row * n_cols]
             
             if cell != 0:
                 board_mask |= 1 << bit_index
@@ -135,7 +135,7 @@ def find_opponent_col(board_mask, prev_board_mask, n_rows):
     
     bit_index = move.bit_length() - 1
     
-    col = bit_index // n_rows
+    col = bit_index // (n_rows + 1)
     
     return col
 
@@ -227,6 +227,13 @@ def dfs(node: Node, c, board_mask, player, top_mask, bottom_mask, n_rows, n_cols
     node.n_wins += result
 
     return result
+
+# for multiple games
+def reset_agent():
+    global root, prev_board_mask, table
+    root = None
+    prev_board_mask = 0
+    table = None
     
 root = None
 prev_board_mask = 0
@@ -249,24 +256,23 @@ def act(observation, configuration):
         table = {}
     if prev_board_mask > 0:
         opponent_col = find_opponent_col(board_mask, prev_board_mask, n_rows)
-        if opponent_col is not None and root.children[opponent_col]:
+        if opponent_col is not None and opponent_col in root.children:
             root = root.children[opponent_col]
         else:
             root = Node(n_cols)
             
-    # board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow
     opponent = get_opponent_mask(board_mask, player)
     win_move = immediate_win(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow)
     block_move = immediate_win(board_mask, opponent, top_mask, bottom_mask, n_rows, n_cols, inarow)
     
     immediate_move = None
-    if block_move:
+    if block_move is not None:
         immediate_move = block_move
-    if win_move:
+    if win_move is not None:
         immediate_move = win_move
             
     if immediate_move is not None:
-        if root.children[immediate_move]:
+        if immediate_move in root.children:
             root = root.children[immediate_move]
         else:
             root = Node(n_cols)

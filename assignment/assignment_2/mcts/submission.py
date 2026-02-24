@@ -198,7 +198,7 @@ def dfs(node: Node, board, mark, c, my_mark, opponent_mark, inarow, table):
 root = None
 prev_board = None
 table = None
-def act(observation, configuration):
+def act_(observation, configuration):
     n_rows = configuration.rows
     n_cols = configuration.columns
     inarow = configuration.inarow
