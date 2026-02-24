@@ -47,7 +47,7 @@ def convert_bitboard(board, my_mark, n_rows, n_cols):
     
     for col in range(n_cols):
         for row in range(n_rows):
-            bit_index = row + col * (n_rows + 1)
+            bit_index = (n_rows - row - 1) + col * (n_rows + 1)
             cell = board[col + row * n_cols]
             
             if cell != 0:
@@ -247,8 +247,8 @@ def act(observation, configuration):
             
     board_mask, player = convert_bitboard(board, my_mark, n_rows, n_cols)
     
-    top_mask = [(1 << c * (n_rows + 1)) for c in range(n_cols)]
-    bottom_mask = [(1 << (c * (n_rows + 1) + n_rows - 1)) for c in range(n_cols)]
+    bottom_mask = [(1 << c * (n_rows + 1)) for c in range(n_cols)]
+    top_mask = [(1 << (c * (n_rows + 1) + n_rows - 1)) for c in range(n_cols)]
     
     global root, prev_board_mask, table
     if not root:

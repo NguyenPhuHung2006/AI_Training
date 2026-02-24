@@ -16,10 +16,10 @@ for i in range(N_GAMES):
 
     try:
         if i % 2 == 0:
-            env.run(["random", act])
+            env.run([act_, act])
             my_index = 1
         else:
-            env.run([act, "random"])
+            env.run([act, act_])
             my_index = 0
 
     except Exception:
