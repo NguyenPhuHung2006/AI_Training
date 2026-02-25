@@ -3,7 +3,7 @@ from mcts.submission_bitboard import act, reset_agent
 from mcts.submission import act_
 import traceback
 
-# print draw match
+# multiple game
 N_GAMES = 50
 
 wins = 0
@@ -12,14 +12,14 @@ draws = 0
 
 for i in range(N_GAMES):
     reset_agent()
-    env = make("connectx", debug=False)
+    env = make("connectx", debug=True)
 
     try:
         if i % 2 == 0:
-            env.run([act_, act])
+            env.run(["random", act])
             my_index = 1
         else:
-            env.run([act, act_])
+            env.run([act, "random"])
             my_index = 0
 
     except Exception:
@@ -34,10 +34,11 @@ for i in range(N_GAMES):
     elif result == 0:
         losses += 1
         outcome = "LOSS"
-    else:
         env.render(mode="human")
+    else:
         draws += 1
         outcome = "DRAW"
+        env.render(mode="human")
 
     print(f"Game {i+1}: {outcome} | "
           f"Total -> W:{wins} L:{losses} D:{draws}")
@@ -48,51 +49,6 @@ print("Wins:", wins)
 print("Losses:", losses)
 print("Draws:", draws)
 print("Win rate:", wins / N_GAMES)
-
-# multiple game
-# N_GAMES = 50
-
-# wins = 0
-# losses = 0
-# draws = 0
-
-# for i in range(N_GAMES):
-#     reset_agent()
-#     env = make("connectx", debug=False)
-
-#     try:
-#         if i % 2 == 0:
-#             env.run([act_, act])
-#             my_index = 1
-#         else:
-#             env.run([act, act_])
-#             my_index = 0
-
-#     except Exception:
-#         traceback.print_exc()
-#         continue
-
-#     result = env.state[my_index].reward
-
-#     if result == 1:
-#         wins += 1
-#         outcome = "WIN"
-#     elif result == 0:
-#         losses += 1
-#         outcome = "LOSS"
-#     else:
-#         draws += 1
-#         outcome = "DRAW"
-
-#     print(f"Game {i+1}: {outcome} | "
-#           f"Total -> W:{wins} L:{losses} D:{draws}")
-
-# print("\nFinal Results")
-# print("Games:", N_GAMES)
-# print("Wins:", wins)
-# print("Losses:", losses)
-# print("Draws:", draws)
-# print("Win rate:", wins / N_GAMES)
 
 # single game
 # env = make("connectx", debug=True)
