@@ -7,7 +7,6 @@ class Node:
         self.n_visits = 0
         self.n_wins = 0
         self.children = {}
-        self.valid_moves = {}
         self.untried_moves = {cols for cols in range(n_cols)}
         
     def compute_uct(self, c, n_prev_visits):
@@ -76,10 +75,12 @@ def is_win(player, n_rows, inarow):
 def can_play(board_mask, col, top_mask):
     return board_mask & top_mask[col] == 0
 
-def play_move(board_mask, player, col, bottom_mask):
+def play_move(board_mask, player, col, bottom_mask, n_rows, n_cols):
     move = board_mask + bottom_mask[col]
-    board_mask |= move
-    player ^= move
+    flipped_board_mask = ~board_mask & ((1 << ((n_rows + 1) * n_cols)) - 1)
+    new_piece = flipped_board_mask & move
+    board_mask |= new_piece
+    player |= new_piece
     return board_mask, player
 
 def get_opponent_mask(board_mask, player):
@@ -97,7 +98,7 @@ def avoid_losing_moves(board_mask, player, top_mask, bottom_mask, n_rows, n_cols
         if not can_play(board_mask, col, top_mask):
             continue
         
-        next_board_mask, _ = play_move(board_mask, player, col, bottom_mask)
+        next_board_mask, _ = play_move(board_mask, player, col, bottom_mask, n_rows, n_cols)
         
         # check if the opponent wins next
         losing = False
@@ -105,7 +106,7 @@ def avoid_losing_moves(board_mask, player, top_mask, bottom_mask, n_rows, n_cols
             if not can_play(next_board_mask, opponent_col, top_mask):
                 continue
             
-            _, next_opponent = play_move(next_board_mask, opponent, opponent_col, bottom_mask)
+            _, next_opponent = play_move(next_board_mask, opponent, opponent_col, bottom_mask, n_rows, n_cols)
             
             if is_win(next_opponent, n_rows, inarow):
                 losing = True
@@ -121,7 +122,7 @@ def immediate_win(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, ina
         if not can_play(board_mask, col, top_mask):
             continue
         
-        _, next_player = play_move(board_mask, player, col, bottom_mask)
+        _, next_player = play_move(board_mask, player, col, bottom_mask, n_rows, n_cols)
         
         if is_win(next_player, n_rows, inarow):
             return col
@@ -139,20 +140,19 @@ def find_opponent_col(board_mask, prev_board_mask, n_rows):
     
     return col
 
-def roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow):
+def roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow, is_root_player):
     current = player
-    B = board_mask
     is_winning = True
     
     while True:
-        valid = [c for c in range(n_cols) if can_play(B, c, top_mask)]
+        valid = [c for c in range(n_cols) if can_play(board_mask, c, top_mask)]
         
         if not valid:
             return 0
         
-        opponent = get_opponent_mask(B, current)
-        win_move = immediate_win(B, current, top_mask, bottom_mask, n_rows, n_cols, inarow)
-        block_move = immediate_win(B, opponent, top_mask, bottom_mask, n_rows, n_cols, inarow)
+        opponent = get_opponent_mask(board_mask, current)
+        win_move = immediate_win(board_mask, current, top_mask, bottom_mask, n_rows, n_cols, inarow)
+        block_move = immediate_win(board_mask, opponent, top_mask, bottom_mask, n_rows, n_cols, inarow)
         col = None
         
         if block_move is not None:
@@ -162,32 +162,42 @@ def roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow):
         if col is None:
             col = random.choice(valid)
     
-        B, current = play_move(B, current, col, bottom_mask)
+        board_mask, current = play_move(board_mask, current, col, bottom_mask, n_rows, n_cols)
         
         if is_win(current, n_rows, inarow):
-            return 1 if is_winning else -1
+            return -1 if is_winning ^ is_root_player else 1
         
-        current = get_opponent_mask(B, current)
+        current = get_opponent_mask(board_mask, current)
         is_winning ^= 1
         
-def dfs(node: Node, c, board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow, table):
-    if node.n_visits == 0:
-        node.n_visits = 1
-        result = roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow)
-        node.n_wins += result
-        node.valid_moves = {c for c in range(n_cols) if can_play(board_mask, c, top_mask)}
-        return result
+def dfs(node: Node, 
+        c, 
+        board_mask, 
+        player, 
+        top_mask, bottom_mask, 
+        n_rows, n_cols, 
+        inarow, 
+        table, 
+        is_root_player=False):
     
     opponent = get_opponent_mask(board_mask, player)
-    node.n_visits += 1    
-    next_cols = node.valid_moves & node.untried_moves
+    
+    if node.n_visits == 0:
+        node.n_visits = 1
+        result = roll_out(board_mask, opponent, top_mask, bottom_mask, n_rows, n_cols, inarow, is_root_player)
+        node.n_wins += result
+        return result
+    
+    node.n_visits += 1
+    valid_moves = {c for c in range(n_cols) if can_play(board_mask, c, top_mask)}
+    next_cols = valid_moves & node.untried_moves
     child = None
     next_col = None
     
     if next_cols:
         next_col = center_bias(next_cols, n_cols)
         
-        next_board_mask, next_player = play_move(board_mask, player, next_col, bottom_mask)
+        next_board_mask, next_player = play_move(board_mask, player, next_col, bottom_mask, n_rows, n_cols)
         board_hash = (next_board_mask, next_player)
         
         if board_hash in table:
@@ -203,25 +213,29 @@ def dfs(node: Node, c, board_mask, player, top_mask, bottom_mask, n_rows, n_cols
         
     # the board is full
     if child is None or next_col is None:
-        if is_win(player, n_rows, inarow):
-            return 1
-        if is_win(opponent, n_rows, inarow):
-            return -1
+        is_player_win = is_win(player, n_rows, inarow)
+        is_opponent_win = is_win(opponent, n_rows, inarow)
+        if is_player_win:
+            return 1 if is_root_player else -1
+        if is_opponent_win:
+            return -1 if is_root_player else 1
         return 0
     
-    next_board_mask, _ = play_move(board_mask, player, next_col, bottom_mask)
+    next_board_mask, next_player = play_move(board_mask, player, next_col, bottom_mask, n_rows, n_cols)
+    next_opponent = get_opponent_mask(next_board_mask, next_player)
     
-    result = -dfs(
+    result = dfs(
         child, 
         c, 
         next_board_mask,
-        opponent,
+        next_opponent,
         top_mask,
         bottom_mask,
         n_rows,
         n_cols,
         inarow,
-        table    
+        table,
+        is_root_player=is_root_player ^ 1
     )
     
     node.n_wins += result
