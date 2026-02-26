@@ -173,17 +173,13 @@ def roll_out(board_mask, player, is_root_turn):
         block_move = immediate_win(board_mask, opponent)
         double_threat_move = immediate_threat(board_mask, current, 2)
         block_double_threat_move = immediate_threat(board_mask, opponent, 2)
-        single_threat_move = immediate_threat(board_mask, current, 1)
-        block_single_threat_move = immediate_threat(board_mask, opponent, 1)
         col = None
             
         candidates = [
             win_move,
             double_threat_move,
             block_move,
-            block_double_threat_move,
-            single_threat_move,
-            block_single_threat_move,
+            block_double_threat_move
         ]
 
         col = next((move for move in candidates if move is not None), None)
@@ -321,17 +317,13 @@ def act(observation, configuration):
     block_move = immediate_win(board_mask, opponent)
     double_threat_move = immediate_threat(board_mask, player, 2)
     block_double_threat_move = immediate_threat(board_mask, opponent, 2)
-    single_threat_move = immediate_threat(board_mask, player, 1)
-    block_single_threat_move = immediate_threat(board_mask, opponent, 1)
     
     immediate_move = None
     candidates = [
         win_move,
         double_threat_move,
         block_move,
-        block_double_threat_move,
-        single_threat_move,
-        block_single_threat_move,
+        block_double_threat_move
     ]
 
     immediate_move = next((move for move in candidates if move is not None), None)
