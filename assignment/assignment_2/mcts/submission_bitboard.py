@@ -8,20 +8,18 @@ class Node:
         self.n_wins = 0
         self.children = {}
         self.untried_moves = {cols for cols in range(n_cols)}
-        self.is_full = False
-        self.valid_moves = set()
         
     def compute_uct(self, c, n_prev_visits):
         if self.n_visits == 0:
             return np.inf
         return (self.n_wins / self.n_visits) + c * np.sqrt(np.log(n_prev_visits) / self.n_visits)
         
-    def get_max_uct(self, c):
+    def get_max_uct(self, c, board_mask):
         node = None
         max_uct = -np.inf
         max_col = None
         for col, child in self.children.items():
-            if child is None:
+            if child is None or not can_play(board_mask, col):
                 continue
             uct = child.compute_uct(c, self.n_visits)
             if uct > max_uct:
@@ -31,16 +29,16 @@ class Node:
         
         return node, max_col
     
-    def get_max_visit(self):
+    def get_max_visit(self, board_mask):
         max_visit = -np.inf
-        max_cols = None
-        for cols, child in self.children.items():
-            if child is None:
+        best_col = None
+        for col, child in self.children.items():
+            if child is None or not can_play(board_mask, col):
                 continue
             if child.n_visits > max_visit:
-                max_cols = cols
+                best_col = col
                 max_visit = child.n_visits
-        return max_cols  
+        return best_col  
 
 def convert_bitboard(board):
     board_mask = 0
@@ -207,8 +205,6 @@ def dfs(node: Node,
         node.n_visits = 1
         result = roll_out(board_mask, player, is_root_turn)
         node.n_wins += result
-        node.valid_moves = {c for c in range(n_cols) if can_play(board_mask, c)}
-        node.is_full = not node.valid_moves
         return result
     
     opponent = get_opponent_mask(board_mask, player)
@@ -216,7 +212,8 @@ def dfs(node: Node,
     is_player_win = is_win(player)
     is_opponent_win = is_win(opponent)
     
-    if is_player_win or is_opponent_win or node.is_full:
+    valid_moves = {c for c in range(n_cols) if can_play(board_mask, c)}
+    if is_player_win or is_opponent_win or not valid_moves:
         if is_player_win:
             return win_score if is_root_turn else lose_score
         if is_opponent_win:
@@ -224,7 +221,7 @@ def dfs(node: Node,
         return draw_score
     
     node.n_visits += 1
-    next_cols = node.valid_moves & node.untried_moves
+    next_cols = valid_moves & node.untried_moves
     child = None
     next_col = None
     
@@ -243,7 +240,14 @@ def dfs(node: Node,
         node.untried_moves.discard(next_col)
         node.children[next_col] = child
     else:
-        child, next_col = node.get_max_uct(c)
+        child, next_col = node.get_max_uct(c, board_mask)
+        
+    if child is None or next_col is None:
+        if is_player_win:
+            return win_score if is_root_turn else lose_score
+        if is_opponent_win:
+            return lose_score if is_root_turn else win_score
+        return draw_score
     
     next_board_mask, next_player = play_move(board_mask, player, next_col)
     next_opponent = get_opponent_mask(next_board_mask, next_player)
@@ -342,7 +346,10 @@ def act(observation, configuration):
     while time.time() - start < 1.6:
         dfs(root, c, board_mask, player)
     
-    next_col = root.get_max_visit()
+    next_col = root.get_max_visit(board_mask)
+    if next_col is None or not can_play(board_mask, next_col):
+        valid = [c for c in range(n_cols) if can_play(board_mask, c)]
+        return random.choice(valid)
     root = root.children[next_col]
     prev_board_mask = board_mask
     return next_col         
