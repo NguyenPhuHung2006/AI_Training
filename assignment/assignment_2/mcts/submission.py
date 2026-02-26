@@ -195,10 +195,16 @@ def dfs(node: Node, board, mark, c, my_mark, opponent_mark, inarow, table):
     node.n_wins += delta
     return delta
 
+def reset_agent_numpy():
+    global root, prev_board, table
+    root = None
+    prev_board = None
+    table = None
+
 root = None
 prev_board = None
 table = None
-def act_(observation, configuration):
+def act_numpy(observation, configuration):
     n_rows = configuration.rows
     n_cols = configuration.columns
     inarow = configuration.inarow
@@ -245,7 +251,7 @@ def act_(observation, configuration):
 
     c = 1.0
     start = time.time()
-    while time.time() - start < 1.8:
+    while time.time() - start < 1.6:
         sim_board = board.copy()
         dfs(root, sim_board, my_mark, c, my_mark, opponent_mark, inarow, table)
     

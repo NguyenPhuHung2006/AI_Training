@@ -140,7 +140,7 @@ def find_opponent_col(board_mask, prev_board_mask, n_rows):
     
     return col
 
-def roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow, is_root_player):
+def roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow, is_root_turn):
     current = player
     is_winning = True
     
@@ -165,7 +165,7 @@ def roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow, 
         board_mask, current = play_move(board_mask, current, col, bottom_mask, n_rows, n_cols)
         
         if is_win(current, n_rows, inarow):
-            return -1 if is_winning ^ is_root_player else 1
+            return -1 if is_winning ^ is_root_turn else 1
         
         current = get_opponent_mask(board_mask, current)
         is_winning ^= 1
@@ -178,16 +178,15 @@ def dfs(node: Node,
         n_rows, n_cols, 
         inarow, 
         table, 
-        is_root_player=False):
-    
-    opponent = get_opponent_mask(board_mask, player)
-    
+        is_root_turn=True):
+        
     if node.n_visits == 0:
         node.n_visits = 1
-        result = roll_out(board_mask, opponent, top_mask, bottom_mask, n_rows, n_cols, inarow, is_root_player)
+        result = roll_out(board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow, is_root_turn)
         node.n_wins += result
         return result
     
+    opponent = get_opponent_mask(board_mask, player)
     node.n_visits += 1
     valid_moves = {c for c in range(n_cols) if can_play(board_mask, c, top_mask)}
     next_cols = valid_moves & node.untried_moves
@@ -216,9 +215,9 @@ def dfs(node: Node,
         is_player_win = is_win(player, n_rows, inarow)
         is_opponent_win = is_win(opponent, n_rows, inarow)
         if is_player_win:
-            return 1 if is_root_player else -1
+            return 1 if is_root_turn else -1
         if is_opponent_win:
-            return -1 if is_root_player else 1
+            return -1 if is_root_turn else 1
         return 0
     
     next_board_mask, next_player = play_move(board_mask, player, next_col, bottom_mask, n_rows, n_cols)
@@ -235,7 +234,7 @@ def dfs(node: Node,
         n_cols,
         inarow,
         table,
-        is_root_player=is_root_player ^ 1
+        is_root_turn=is_root_turn ^ 1
     )
     
     node.n_wins += result
@@ -296,7 +295,7 @@ def act(observation, configuration):
     
     c = 1.36
     start = time.time()
-    while time.time() - start < 1.8:
+    while time.time() - start < 1.6:
         dfs(root, c, board_mask, player, top_mask, bottom_mask, n_rows, n_cols, inarow, table)
     
     next_col = root.get_max_visit()
