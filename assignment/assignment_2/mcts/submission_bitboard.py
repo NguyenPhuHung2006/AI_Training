@@ -148,7 +148,7 @@ def roll_out(board_mask, player, is_root_turn):
         valid = [c for c in range(n_cols) if can_play(board_mask, c)]
         
         if not valid:
-            return 0
+            return draw_score
         
         opponent = get_opponent_mask(board_mask, current)
         win_move = immediate_win(board_mask, current)
@@ -166,7 +166,7 @@ def roll_out(board_mask, player, is_root_turn):
         
         if is_win(current):
             is_root_winning = is_winning ^ is_root_turn
-            return -1 if is_root_winning else 1
+            return lose_score if is_root_winning else win_score
         
         current = get_opponent_mask(board_mask, current)
         is_winning ^= 1
@@ -212,10 +212,10 @@ def dfs(node: Node,
         is_player_win = is_win(player)
         is_opponent_win = is_win(opponent)
         if is_player_win:
-            return 1 if is_root_turn else -1
+            return win_score if is_root_turn else lose_score
         if is_opponent_win:
-            return -1 if is_root_turn else 1
-        return 0
+            return lose_score if is_root_turn else win_score
+        return draw_score
     
     next_board_mask, next_player = play_move(board_mask, player, next_col)
     next_opponent = get_opponent_mask(next_board_mask, next_player)
@@ -240,6 +240,7 @@ def reset_agent():
     table = None
     is_init = False
     
+# global variables
 root = None
 prev_board_mask = 0
 table = None
@@ -250,9 +251,12 @@ my_mark = 0
 bottom_mask = None
 top_mask = None
 is_init = False
+win_score = 0
+lose_score = 0
+draw_score = 0
 def act(observation, configuration):
         
-    global is_init, n_rows, n_cols, inarow, my_mark, bottom_mask, top_mask
+    global is_init, n_rows, n_cols, inarow, my_mark, bottom_mask, top_mask, win_score, lose_score, draw_score
     if not is_init:
         is_init = True
         n_rows = configuration.rows
@@ -261,6 +265,9 @@ def act(observation, configuration):
         my_mark = observation.mark
         bottom_mask = [(1 << c * (n_rows + 1)) for c in range(n_cols)]
         top_mask = [(1 << (c * (n_rows + 1) + n_rows - 1)) for c in range(n_cols)]
+        win_score = 1
+        lose_score = -1
+        draw_score = 0
         
     board = observation.board
             
