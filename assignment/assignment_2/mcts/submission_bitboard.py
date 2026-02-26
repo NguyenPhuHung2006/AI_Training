@@ -130,8 +130,8 @@ def immediate_win(board_mask, player, get_list=False, exclude_move=None):
                 immediate_win_moves.append(col)
     return None if not get_list else immediate_win_moves
 
-def double_threat(board_mask, player, get_list=False, exclude_move=None):   
-    double_threat_moves = []
+def immediate_threat(board_mask, player, num_win, get_list=False, exclude_move=None):   
+    threat_moves = []
     for col in range(n_cols):
         if (exclude_move is not None and col == exclude_move) or not can_play(board_mask, col):
             continue
@@ -139,12 +139,12 @@ def double_threat(board_mask, player, get_list=False, exclude_move=None):
         next_board_mask, next_player = play_move(board_mask, player, col)
         immediate_win_moves = immediate_win(next_board_mask, next_player, get_list=True, exclude_move=col)
         
-        if len(immediate_win_moves) >= 2:
+        if len(immediate_win_moves) >= num_win:
             if not get_list:
                 return col
             else:
-                double_threat_moves.append(col)
-    return None if not get_list else double_threat_moves
+                threat_moves.append(col)
+    return None if not get_list else threat_moves
 
 def find_opponent_col(board_mask, prev_board_mask):
     move = board_mask ^ prev_board_mask
@@ -171,18 +171,23 @@ def roll_out(board_mask, player, is_root_turn):
         opponent = get_opponent_mask(board_mask, current)
         win_move = immediate_win(board_mask, current)
         block_move = immediate_win(board_mask, opponent)
-        double_threat_move = double_threat(board_mask, current)
-        block_double_threat_move = double_threat(board_mask, opponent)
+        double_threat_move = immediate_threat(board_mask, current, 2)
+        block_double_threat_move = immediate_threat(board_mask, opponent, 2)
+        single_threat_move = immediate_threat(board_mask, current, 1)
+        block_single_threat_move = immediate_threat(board_mask, opponent, 1)
         col = None
+            
+        candidates = [
+            win_move,
+            double_threat_move,
+            block_move,
+            block_double_threat_move,
+            single_threat_move,
+            block_single_threat_move,
+        ]
 
-        if block_double_threat_move is not None:
-            col = block_double_threat_move
-        if block_move is not None:
-            col = block_move
-        if double_threat_move is not None:
-            col = double_threat_move
-        if win_move is not None:
-            col = win_move
+        col = next((move for move in candidates if move is not None), None)
+        
         if col is None:
             safe_moves = avoid_losing_moves(board_mask, current)
             col = random.choice(safe_moves) if safe_moves else random.choice(valid)
@@ -314,18 +319,22 @@ def act(observation, configuration):
     opponent = get_opponent_mask(board_mask, player)
     win_move = immediate_win(board_mask, player)
     block_move = immediate_win(board_mask, opponent)
-    double_threat_move = double_threat(board_mask, player)
-    block_double_threat_move = double_threat(board_mask, opponent)
+    double_threat_move = immediate_threat(board_mask, player, 2)
+    block_double_threat_move = immediate_threat(board_mask, opponent, 2)
+    single_threat_move = immediate_threat(board_mask, player, 1)
+    block_single_threat_move = immediate_threat(board_mask, opponent, 1)
     
     immediate_move = None
-    if block_double_threat_move is not None:
-        immediate_move = block_double_threat_move
-    if block_move is not None:
-        immediate_move = block_move
-    if double_threat_move is not None:
-        immediate_move = double_threat_move
-    if win_move is not None:
-        immediate_move = win_move
+    candidates = [
+        win_move,
+        double_threat_move,
+        block_move,
+        block_double_threat_move,
+        single_threat_move,
+        block_single_threat_move,
+    ]
+
+    immediate_move = next((move for move in candidates if move is not None), None)
 
     if immediate_move is not None:
         if immediate_move in root.children:
