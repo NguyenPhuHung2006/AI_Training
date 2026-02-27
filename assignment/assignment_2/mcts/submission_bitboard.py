@@ -200,12 +200,6 @@ def dfs(node: Node,
         board_mask, 
         player, 
         is_root_turn=True):
-        
-    if node.n_visits == 0:
-        node.n_visits = 1
-        result = roll_out(board_mask, player, is_root_turn)
-        node.n_wins += result
-        return result
     
     opponent = get_opponent_mask(board_mask, player)
     
@@ -219,6 +213,12 @@ def dfs(node: Node,
         if is_opponent_win:
             return lose_score if is_root_turn else win_score
         return draw_score
+        
+    if node.n_visits == 0:
+        node.n_visits = 1
+        result = roll_out(board_mask, player, is_root_turn)
+        node.n_wins += result
+        return result
     
     node.n_visits += 1
     next_cols = valid_moves & node.untried_moves
@@ -321,13 +321,16 @@ def act(observation, configuration):
     block_move = immediate_win(board_mask, opponent)
     double_threat_move = immediate_threat(board_mask, player, 2)
     block_double_threat_move = immediate_threat(board_mask, opponent, 2)
+    safe_moves = avoid_losing_moves(board_mask, player)
+    safe_move = safe_moves[0] if len(safe_moves) == 1 else None
     
     immediate_move = None
     candidates = [
         win_move,
         double_threat_move,
         block_move,
-        block_double_threat_move
+        block_double_threat_move,
+        safe_move
     ]
 
     immediate_move = next((move for move in candidates if move is not None), None)
