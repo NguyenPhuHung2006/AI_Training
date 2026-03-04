@@ -80,9 +80,8 @@ class Cost(ABC):
     def compute_dA(self, y_pred, y):
         pass
     
-    @abstractmethod
-    def output_dZ(self, dA, Y, layer):
-        pass
+    def compute_dZ(self, dA, Y, layer):
+        return dA * layer.activation.derivative_from_a(layer.A)
 
 
 class MSE(Cost):
@@ -91,9 +90,6 @@ class MSE(Cost):
 
     def compute_dA(self, y_pred, y):
         return (y_pred - y)
-    
-    def output_dZ(self, dA, Y, layer):
-        return dA * layer.activation.derivative_from_a(layer.A)
 
 
 class BCE(Cost):
@@ -110,13 +106,10 @@ class BCE(Cost):
         y_pred = np.clip(y_pred, eps, 1 - eps)
         return -(y / y_pred) + ((1 - y) / (1 - y_pred))
     
-    def output_dZ(self, dA, Y, layer):
-        activation = layer.activation
-        
-        if isinstance(activation, Sigmoid):
+    def compute_dZ(self, dA, Y, layer):
+        if isinstance(layer.activation, Sigmoid):
             return layer.A - Y
-
-        return dA * activation.derivative_from_a(layer.A)
+        return super().compute_dZ(dA, Y, layer)
     
     def compute_accuracy(self, y_pred, y, threshold=0.5):
         preds = (y_pred > threshold).astype(int)
@@ -157,13 +150,8 @@ class Layer:
 
         return A
     
-    def backward(self, dA, Y, cost_function, lr, m, is_output):     
-        dZ = None
-        if is_output:
-            dZ = cost_function.output_dZ(dA, Y, self)
-        else:
-            dZ = dA * self.activation.derivative_from_a(self.A)
-           
+    def backward(self, dA, Y, cost_function, lr, m):     
+        dZ = cost_function.compute_dZ(dA, Y, self)
         dW = (dZ.T @ self.input) / m
         db = np.sum(dZ, axis=0, keepdims=True) / m
         dA = dZ @ self.W
@@ -177,7 +165,7 @@ class Layer:
 # =========================
 # Neural Network
 # =========================
-class NN:
+class NeuralNetwork:
     def __init__(self, n_inputs, cost_function=None):
         self.n_inputs = n_inputs
         self.cost_function = cost_function
@@ -208,15 +196,12 @@ class NN:
         m = y.shape[0]
         dA = self.cost_function.compute_dA(y_pred, y)
 
-        for i, layer in enumerate(reversed(self.layers)):
-            is_output = (i == 0)
-            dA = layer.backward(dA, y, self.cost_function, lr, m, is_output)
+        for layer in reversed(self.layers):
+            dA = layer.backward(dA, y, self.cost_function, lr, m)
 
     # evaluation helper
-    def evaluate(self, X, y):
-        y_pred = self.predict(X, store=False)
+    def evaluate(self, y_pred, y):
         loss = self.cost_function.compute_cost(y_pred, y)
-
         acc = None
         if isinstance(self.cost_function, BCE):
             acc = self.cost_function.compute_accuracy(y_pred, y)
@@ -224,29 +209,22 @@ class NN:
         return loss, acc
 
     # training
-    def fit(self, X, y, n_iterations=10000, lr=0.01,
-            print_cost=False, print_accuracy=False):
+    def fit(self, X, y, n_iterations=10000, lr=0.01, check_every=None):
 
         if not self.cost_function:
             raise ValueError("Cost function must be defined")
-
-        print_every = max(1, n_iterations // 10)
 
         for i in range(n_iterations):
             y_pred = self.predict(X, store=True)
             self.backward(y_pred, y, lr)
 
-            if i % print_every == 0 and (print_cost or print_accuracy):
+            if check_every is not None and i % max(1, check_every) == 0:
                 
                 msg = [f"{i} |"]
-                
-                loss = self.cost_function.compute_cost(y_pred, y)
-                
-                if print_cost:
-                    msg.append(f" loss:{loss:.4f}")
-
-                if print_accuracy and isinstance(self.cost_function, BCE):
-                    acc = self.cost_function.compute_accuracy(y_pred, y)
+                    
+                loss, acc = self.evaluate(y_pred, y)
+                msg.append(f" loss:{loss:.4f}")
+                if acc is not None:
                     msg.append(f" acc:{acc * 100:.2f}%")
 
                 print(''.join(msg))
@@ -255,8 +233,7 @@ class NN:
     def fit_with_validation(self, X, y,
                             n_iterations=10000,
                             lr=0.01,
-                            print_cost=True,
-                            print_accuracy=False,
+                            check_every=None,
                             test_size=0.2,
                             random_state=42):
 
@@ -264,23 +241,20 @@ class NN:
             X, y, test_size=test_size, random_state=random_state
         )
 
-        print_every = max(1, n_iterations // 10)
-
         for i in range(n_iterations):
-            y_pred = self.predict(X_train, store=True)
-            self.backward(y_pred, y_train, lr)
+            y_pred_train = self.predict(X_train, store=True)
+            self.backward(y_pred_train, y_train, lr)
 
-            if i % print_every == 0 and (print_cost or print_accuracy):
-                train_loss, train_acc = self.evaluate(X_train, y_train)
-                val_loss, val_acc = self.evaluate(X_val, y_val)
+            if check_every is not None and i % max(1, check_every) == 0:
+                y_pred_val = self.predict(X_val, store=False)
+                train_loss, train_acc = self.evaluate(y_pred_train, y_train)
+                val_loss, val_acc = self.evaluate(y_pred_val, y_val)
                 
                 msg = [f"{i}\n"]
                 
-                if print_cost:
-                    msg.append(f"cost -> train:{train_loss:.4f}, validation:{val_loss:.4f}")
-                    
-                if print_accuracy and train_acc is not None and val_acc is not None:
-                    msg.append(f"acc -> train:{train_acc * 100:.2f}, validation:{val_acc * 100:.2f}")
+                msg.append(f"cost -> train:{train_loss:.4f}, validation:{val_loss:.4f}")
+                if train_acc is not None and val_acc is not None:
+                    msg.append(f"acc -> train:{train_acc * 100:.2f}%, validation:{val_acc * 100:.2f}%")
 
                 print(''.join(msg))
                 
