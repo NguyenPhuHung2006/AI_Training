@@ -131,7 +131,7 @@ class Layer:
         else:
             scale = np.sqrt(1 / n_inputs)
 
-        self.W = np.random.randn(n_units, n_inputs) * scale
+        self.W = np.random.randn(n_inputs, n_units) * scale
         self.b = np.zeros((1, n_units))
 
         # cache for backprop
@@ -140,7 +140,7 @@ class Layer:
         self.input = None
 
     def forward(self, X, store=True):
-        Z = X @ self.W.T + self.b
+        Z = X @ self.W + self.b
         A = self.activation.compute(Z)
 
         if store:
@@ -152,9 +152,9 @@ class Layer:
     
     def backward(self, dA, Y, cost_function, lr, m):     
         dZ = cost_function.compute_dZ(dA, Y, self)
-        dW = (dZ.T @ self.input) / m
+        dW = (self.input.T @ dZ) / m
         db = np.sum(dZ, axis=0, keepdims=True) / m
-        dA = dZ @ self.W
+        dA = dZ @ self.W.T
 
         self.W -= lr * dW
         self.b -= lr * db
