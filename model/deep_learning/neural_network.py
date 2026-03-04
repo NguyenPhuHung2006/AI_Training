@@ -96,7 +96,7 @@ class MSE(Cost):
         return dA * layer.activation.derivative_from_a(layer.A)
 
 
-class BinaryCrossEntropy(Cost):
+class BCE(Cost):
     def compute_cost(self, y_pred, y):
         eps = 1e-8
         y_pred = np.clip(y_pred, eps, 1 - eps)
@@ -139,7 +139,7 @@ class Layer:
             scale = np.sqrt(1 / n_inputs)
 
         self.W = np.random.randn(n_units, n_inputs) * scale
-        self.b = np.zeros((n_units, 1))
+        self.b = np.zeros((1, n_units))
 
         # cache for backprop
         self.Z = None
@@ -147,7 +147,7 @@ class Layer:
         self.input = None
 
     def forward(self, X, store=True):
-        Z = self.W @ X + self.b
+        Z = X @ self.W.T + self.b
         A = self.activation.compute(Z)
 
         if store:
@@ -164,9 +164,9 @@ class Layer:
         else:
             dZ = dA * self.activation.derivative_from_a(self.A)
            
-        dW = (dZ @ self.input.T) / m
-        db = np.sum(dZ, axis=1, keepdims=True) / m
-        dA = self.W.T @ dZ
+        dW = (dZ.T @ self.input) / m
+        db = np.sum(dZ, axis=0, keepdims=True) / m
+        dA = dZ @ self.W
 
         self.W -= lr * dW
         self.b -= lr * db
@@ -192,9 +192,9 @@ class NN:
         if not self.layers:
             raise ValueError("NN doesn't have any layers")
 
-        if X.shape[0] != self.n_inputs:
+        if X.shape[1] != self.n_inputs:
             raise ValueError(
-                f"Expected input with {self.n_inputs} features, got {X.shape[0]}"
+                f"Expected input with {self.n_inputs} features, got {X.shape[1]}"
             )
 
         A = X
@@ -205,7 +205,7 @@ class NN:
     
     # backward pass
     def backward(self, y_pred, y, lr):
-        m = y.shape[1]
+        m = y.shape[0]
         dA = self.cost_function.compute_dA(y_pred, y)
 
         for i, layer in enumerate(reversed(self.layers)):
@@ -218,7 +218,7 @@ class NN:
         loss = self.cost_function.compute_cost(y_pred, y)
 
         acc = None
-        if isinstance(self.cost_function, BinaryCrossEntropy):
+        if isinstance(self.cost_function, BCE):
             acc = self.cost_function.compute_accuracy(y_pred, y)
 
         return loss, acc
@@ -245,7 +245,7 @@ class NN:
                 if print_cost:
                     msg.append(f" loss:{loss:.4f}")
 
-                if print_accuracy and isinstance(self.cost_function, BinaryCrossEntropy):
+                if print_accuracy and isinstance(self.cost_function, BCE):
                     acc = self.cost_function.compute_accuracy(y_pred, y)
                     msg.append(f" acc:{acc * 100:.2f}%")
 
@@ -261,11 +261,8 @@ class NN:
                             random_state=42):
 
         X_train, X_val, y_train, y_val = train_test_split(
-            X.T, y.T, test_size=test_size, random_state=random_state
+            X, y, test_size=test_size, random_state=random_state
         )
-
-        X_train, X_val = X_train.T, X_val.T
-        y_train, y_val = y_train.T, y_val.T
 
         print_every = max(1, n_iterations // 10)
 
