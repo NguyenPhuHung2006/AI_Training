@@ -67,6 +67,19 @@ class Relu(Activation):
     def derivative_from_z(self, z):
         return (z > 0).astype(float)
     
+class Softmax(Activation):
+    def compute(self, z):
+        z = z - np.max(z, axis=1, keepdims=True)
+        exp_z = np.exp(z)
+        return exp_z / np.sum(exp_z, axis=1, keepdims=True)
+
+    def derivative_from_a(self, a):
+        return a * (1 - a)
+
+    def derivative_from_z(self, z):
+        a = self.compute(z)
+        return self.derivative_from_a(a)
+    
 # =========================
 # Cost functions
 # =========================
@@ -86,7 +99,7 @@ class Cost(ABC):
 
 class MSE(Cost):
     def compute_cost(self, y_pred, y):
-        return np.mean((y_pred - y) ** 2) / 2
+        return 0.5 * np.mean(np.sum((y - y_pred)**2, axis=1))
 
     def compute_dA(self, y_pred, y):
         return (y_pred - y)
@@ -96,10 +109,8 @@ class BCE(Cost):
     def compute_cost(self, y_pred, y):
         eps = 1e-8
         y_pred = np.clip(y_pred, eps, 1 - eps)
-        return -np.mean(
-            y * np.log(y_pred) +
-            (1 - y) * np.log(1 - y_pred)
-        )
+        loss = -(y * np.log(y_pred) + (1 - y) * np.log(1 - y_pred))
+        return np.mean(np.sum(loss, axis=1))
 
     def compute_dA(self, y_pred, y):
         eps = 1e-8
@@ -114,6 +125,27 @@ class BCE(Cost):
     def compute_accuracy(self, y_pred, y, threshold=0.5):
         preds = (y_pred > threshold).astype(int)
         return np.mean(preds == y)
+    
+class CCE(Cost):
+    def compute_cost(self, y_pred, y):
+        eps = 1e-8
+        y_pred = np.clip(y_pred, eps, 1)
+        return -np.mean(np.sum(y * np.log(y_pred), axis=1))
+
+    def compute_dA(self, y_pred, y):
+        eps = 1e-8
+        y_pred = np.clip(y_pred, eps, 1)
+        return -(y / y_pred)
+
+    def compute_dZ(self, dA, Y, layer):
+        if isinstance(layer.activation, Softmax):
+            return layer.A - Y
+        return super().compute_dZ(dA, Y, layer)
+    
+    def compute_accuracy(self, y_pred, y):
+        preds = np.argmax(y_pred, axis=1)
+        labels = np.argmax(y, axis=1)
+        return np.mean(preds == labels)
 
 # =========================
 # Layer
@@ -203,7 +235,7 @@ class NeuralNetwork:
     def evaluate(self, y_pred, y):
         loss = self.cost_function.compute_cost(y_pred, y)
         acc = None
-        if isinstance(self.cost_function, BCE):
+        if isinstance(self.cost_function, BCE) or isinstance(self.cost_function, CCE):
             acc = self.cost_function.compute_accuracy(y_pred, y)
 
         return loss, acc
