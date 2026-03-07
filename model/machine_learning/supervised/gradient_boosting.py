@@ -18,6 +18,7 @@ class GB_Base(ABC):
                  max_depth, 
                  min_child_weight, 
                  min_samples_leaf, 
+                 n_classes=1,
                  sub_sample_size=0.8,
                  sub_feature_size=0.8,
                  lambda_=0, 
@@ -29,6 +30,7 @@ class GB_Base(ABC):
         self.max_depth = max_depth
         self.min_child_weight = min_child_weight
         self.min_samples_leaf = min_samples_leaf
+        self.n_classes = n_classes
         self.sub_sample_size = sub_sample_size
         self.sub_feature_size = sub_feature_size
         self.lambda_ = lambda_
@@ -251,17 +253,23 @@ class GB_Base(ABC):
         return np.array([self._predict_tree(x, node) for x in X])
     
     def predict(self, X):
-        y_pred = np.full(X.shape[0], self.init_pred, dtype=float)
+        n_samples = X.shape[0]
+        y_pred = np.tile(self.init_pred, (n_samples, 1))
         
-        for tree in self.trees:
-            y_pred += self.learning_rate * self.predict_tree(X, tree)
-            
+        for tree_round in self.trees:
+            for k, tree in enumerate(tree_round):
+                update = self.predict_tree(X, tree)
+                y_pred[:, k] += self.learning_rate * update
+        
         return y_pred
     
-    def fit(self, X, y, print_every=None):
+    def fit(self, X, y, check_every=None):
+        if y.ndim == 1:
+            y = y[:, None]
         self.trees = []
         self.init_pred = self.init_prediction(y)
-        y_pred = np.full_like(y, self.init_pred, dtype=float)
+        n_samples = X.shape[0]
+        y_pred = np.tile(self.init_pred, (n_samples, 1))
         
         for i in range(self.n_trees):
             gradients = self.gradient(y, y_pred)
@@ -270,15 +278,23 @@ class GB_Base(ABC):
             idx = self.get_random_indices(self.sub_sample_size, len(y), replace=False)
 
             X_sub = X[idx]
-            g_sub = gradients[idx]
-            h_sub = hessians[idx]
-
-            tree = self.build_decision_tree(X_sub, g_sub, h_sub)
-            update = self.predict_tree(X, tree)
-            y_pred += self.learning_rate * update
-            self.trees.append(tree)
             
-            if i > 0 and print_every is not None and i % max(1, print_every) == 0:
+            trees_round = []
+            
+            for k in range(self.n_classes):
+
+                g_sub = gradients[idx, k]
+                h_sub = hessians[idx, k]
+
+                tree = self.build_decision_tree(X_sub, g_sub, h_sub)
+                update = self.predict_tree(X, tree)
+                y_pred[:, k] += self.learning_rate * update
+
+                trees_round.append(tree)
+
+            self.trees.append(trees_round)
+            
+            if i > 0 and check_every is not None and i % max(1, check_every) == 0:
                 print(f"{i:03d} / {self.n_trees:04d}")
     
     def fit_with_validation(
@@ -288,7 +304,8 @@ class GB_Base(ABC):
         early_stopping_rounds=10,
         check_every=1
     ): 
-        
+        if y.ndim == 1:
+            y = y[:, None]
         X_train, X_val, y_train, y_val = train_test_split(
             X, y,
             test_size=test_size,
@@ -296,18 +313,15 @@ class GB_Base(ABC):
         )
 
         self.trees = []
-
         self.init_pred = self.init_prediction(y_train)
-
-        y_pred_train = np.full_like(y_train, self.init_pred, dtype=float)
-        y_pred_val   = np.full_like(y_val, self.init_pred, dtype=float)
+        
+        y_pred_train = np.tile(self.init_pred, (X_train.shape[0], 1))
+        y_pred_val   = np.tile(self.init_pred, (X_val.shape[0], 1))
 
         best_val_loss = float("inf")
         best_iter = 0
         rounds_no_improve = 0
         
-        check_every = max(1, check_every)
-
         for i in range(self.n_trees):
 
             gradients = self.gradient(y_train, y_pred_train)
@@ -316,20 +330,24 @@ class GB_Base(ABC):
             idx = self.get_random_indices(self.sub_sample_size, len(y_train), replace=False)
 
             X_sub = X_train[idx]
-            g_sub = gradients[idx]
-            h_sub = hessians[idx]
+            trees_round = []
+            
+            for k in range(self.n_classes):
 
-            tree = self.build_decision_tree(X_sub, g_sub, h_sub)
+                g_sub = gradients[idx, k]
+                h_sub = hessians[idx, k]
 
-            train_update = self.predict_tree(X_train, tree)
-            val_update   = self.predict_tree(X_val, tree)
+                tree = self.build_decision_tree(X_sub, g_sub, h_sub)
+                train_update = self.predict_tree(X_train, tree)
+                val_update = self.predict_tree(X_val, tree)
+                y_pred_train[:, k] += self.learning_rate * train_update
+                y_pred_val[:, k] += self.learning_rate * val_update
 
-            y_pred_train += self.learning_rate * train_update
-            y_pred_val   += self.learning_rate * val_update
+                trees_round.append(tree)
 
-            self.trees.append(tree)
-
-            if i % check_every == 0:
+            self.trees.append(trees_round)
+            
+            if check_every is not None and i % max(1, check_every) == 0:
 
                 val_loss = self.evaluate(y_val, y_pred_val)
 
@@ -358,7 +376,7 @@ class GB_Base(ABC):
 class GB_Regression(GB_Base):
     
     def init_prediction(self, y):
-        return np.mean(y)
+        return np.mean(y, axis=0)
     
     def gradient(self, y, y_pred):
         return y_pred - y   
@@ -372,7 +390,7 @@ class GB_Regression(GB_Base):
         return - super().soft_threshold(G) / (H + self.lambda_)
     
     def evaluate(self, y, y_pred):
-        return 0.5 * np.mean((y - y_pred)**2)
+        return 0.5 * np.mean(np.sum((y - y_pred)**2, axis=1))
     
 class GB_Classification(GB_Base):
     
@@ -381,7 +399,7 @@ class GB_Classification(GB_Base):
         return 1 / (1 + np.exp(-x))
 
     def init_prediction(self, y):
-        mean_y = np.mean(y)
+        mean_y = np.mean(y, axis=0)
         eps = 1e-15
         mean_y = np.clip(mean_y, eps, 1 - eps)
         return np.log(mean_y / (1 - mean_y))
@@ -411,7 +429,8 @@ class GB_Classification(GB_Base):
         p = self.sigmoid(y_pred)
         eps = 1e-15
         p = np.clip(p, eps, 1 - eps)
-        return -np.mean(y * np.log(p) + (1 - y) * np.log(1 - p))
+        loss = -(y * np.log(p) + (1 - y) * np.log(1 - p))
+        return np.mean(np.sum(loss, axis=1))
     
 class GB_MultiClassification(GB_Base):
     
@@ -420,17 +439,15 @@ class GB_MultiClassification(GB_Base):
         exp_x = np.exp(x)
         return exp_x / np.sum(exp_x, axis=1, keepdims=True)
 
-    def __init__(self, n_classes, **kwargs):
-        super().__init__(**kwargs)
-        self.n_classes = n_classes
-        
     def init_prediction(self, y):
+        y = y.ravel()
         counts = np.bincount(y, minlength=self.n_classes)
         probs = counts / np.sum(counts)
         probs = np.clip(probs, 1e-15, 1)
         return np.log(probs)
     
     def gradient(self, y, y_pred):
+        y = y.ravel()
         p = self.softmax(y_pred)
         y_onehot = np.zeros_like(p)
         y_onehot[np.arange(len(y)), y] = 1
@@ -438,7 +455,8 @@ class GB_MultiClassification(GB_Base):
     
     def hessian(self, y, y_pred):
         p = self.softmax(y_pred)
-        return p * (1 - p)
+        h = p * (1 - p)
+        return np.maximum(h, 1e-6)
     
     def leaf_value(self, gradients, hessians):
         H = np.sum(hessians)
@@ -446,10 +464,19 @@ class GB_MultiClassification(GB_Base):
         return - super().soft_threshold(G) / (H + self.lambda_)
     
     def predict_prob(self, X):
-        logits = super().predict(X)
-        return self.softmax(logits)
+        y_pred = super().predict(X)
+        return self.softmax(y_pred)
 
     def predict_label(self, X):
-        return np.argmax(self.predict_prob(X), axis=1)
-        
+        return np.argmax(self.predict_prob(X), axis=1, keepdims=True)
+    
+    def evaluate(self, y, y_pred):
+        y = y.ravel()
+        p = self.softmax(y_pred)
+
+        eps = 1e-15
+        p = np.clip(p, eps, 1)
+
+        log_probs = -np.log(p[np.arange(len(y)), y])
+        return np.mean(log_probs)
     
