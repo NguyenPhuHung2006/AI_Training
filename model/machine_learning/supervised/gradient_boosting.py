@@ -275,14 +275,11 @@ class GB_Base(ABC):
             gradients = self.gradient(y, y_pred)
             hessians = self.hessian(y, y_pred)
             
-            idx = self.get_random_indices(self.sub_sample_size, len(y), replace=False)
-
-            X_sub = X[idx]
-            
             trees_round = []
             
             for k in range(self.n_classes):
-
+                idx = self.get_random_indices(self.sub_sample_size, len(y), replace=False)
+                X_sub = X[idx]
                 g_sub = gradients[idx, k]
                 h_sub = hessians[idx, k]
 
@@ -327,13 +324,10 @@ class GB_Base(ABC):
             gradients = self.gradient(y_train, y_pred_train)
             hessians  = self.hessian(y_train, y_pred_train)
             
-            idx = self.get_random_indices(self.sub_sample_size, len(y_train), replace=False)
-
-            X_sub = X_train[idx]
             trees_round = []
-            
             for k in range(self.n_classes):
-
+                idx = self.get_random_indices(self.sub_sample_size, len(y_train), replace=False)
+                X_sub = X_train[idx]
                 g_sub = gradients[idx, k]
                 h_sub = hessians[idx, k]
 
