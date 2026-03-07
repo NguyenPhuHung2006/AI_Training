@@ -412,3 +412,44 @@ class GB_Classification(GB_Base):
         eps = 1e-15
         p = np.clip(p, eps, 1 - eps)
         return -np.mean(y * np.log(p) + (1 - y) * np.log(1 - p))
+    
+class GB_MultiClassification(GB_Base):
+    
+    def softmax(self, x):
+        x = x - np.max(x, axis=1, keepdims=True)
+        exp_x = np.exp(x)
+        return exp_x / np.sum(exp_x, axis=1, keepdims=True)
+
+    def __init__(self, n_classes, **kwargs):
+        super().__init__(**kwargs)
+        self.n_classes = n_classes
+        
+    def init_prediction(self, y):
+        counts = np.bincount(y, minlength=self.n_classes)
+        probs = counts / np.sum(counts)
+        probs = np.clip(probs, 1e-15, 1)
+        return np.log(probs)
+    
+    def gradient(self, y, y_pred):
+        p = self.softmax(y_pred)
+        y_onehot = np.zeros_like(p)
+        y_onehot[np.arange(len(y)), y] = 1
+        return p - y_onehot
+    
+    def hessian(self, y, y_pred):
+        p = self.softmax(y_pred)
+        return p * (1 - p)
+    
+    def leaf_value(self, gradients, hessians):
+        H = np.sum(hessians)
+        G = np.sum(gradients)
+        return - super().soft_threshold(G) / (H + self.lambda_)
+    
+    def predict_prob(self, X):
+        logits = super().predict(X)
+        return self.softmax(logits)
+
+    def predict_label(self, X):
+        return np.argmax(self.predict_prob(X), axis=1)
+        
+    
