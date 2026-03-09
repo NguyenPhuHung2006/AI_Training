@@ -779,10 +779,65 @@ class GB_MultiClassification(GB_Base):
 
         log_probs = -np.log(p[np.arange(len(y)), y])
         return np.mean(log_probs)
+    
+def fill_na_median(df):
+    df = df.copy()
+    for col in df.columns:
+        if df[col].dtype != "object":
+            df[col] = df[col].fillna(df[col].median())
             
+    return df
+
+def process_dates(df):
+    df = df.copy()
+    
+    df["date_time"] = pd.to_datetime(df["date_time"], errors="coerce")
+    df["srch_ci"] = pd.to_datetime(df["srch_ci"], errors="coerce")
+    df["srch_co"] = pd.to_datetime(df["srch_co"], errors="coerce")
+
+    df = df.assign(
+        search_month = df["date_time"].dt.month,
+        stay_days = (df["srch_co"] - df["srch_ci"]).dt.days,
+        booking_lead = (df["srch_ci"] - df["date_time"]).dt.days
+    )
+
+    df = df.drop(["date_time", "srch_ci", "srch_co"], axis=1)
+
+    return df
+    
+def read_data(train_path, test_path, dest_path):
+    df_train = pd.read_csv(train_path)
+    df_test = pd.read_csv(test_path)
+    df_dest = pd.read_csv(dest_path)
+    
+    df_train = df_train.sample(n=100000, random_state=42)
+    df_test = df_test.sample(n=10000, random_state=42)
+    
+    df_train = df_train.merge(df_dest, on="srch_destination_id", how="left")
+    df_test = df_test.merge(df_dest, on="srch_destination_id", how="left")
+    
+    df_train = process_dates(df_train)
+    df_test = process_dates(df_test)
+
+    y_train = df_train["hotel_cluster"]
+
+    drop_cols = ["hotel_cluster", "is_booking", "cnt"]
+
+    df_train = df_train.drop(columns=drop_cols)
+    df_test = df_test.drop(columns=drop_cols, errors="ignore")
+
+    df_train = fill_na_median(df_train)
+    df_test = fill_na_median(df_test)
+    
+    X_train = df_train.to_numpy()
+    y_train = y_train.to_numpy()
+    X_test = df_test.to_numpy()
+        
+    return X_train, y_train, X_test
+    
             
 def main():
-    pass    
+    X_train, y_train, X_test = read_data("new_dataset/train.csv", "new_dataset/test.csv", "new_dataset/destinations.csv")
         
 if __name__ == '__main__':
     main()
