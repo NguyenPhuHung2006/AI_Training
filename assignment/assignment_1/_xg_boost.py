@@ -119,12 +119,8 @@ def get_validation(X_train, y_train, model):
     model.fit(
         X_tr, y_tr,
         eval_set=[(X_val, y_val)],
-        early_stopping_rounds=50,
         verbose=True
     )
-    
-# conda activate base
-# python _xg_boost.py
 
 def main():
     X_train, y_train, X_test, passenger_id = read_data(
@@ -133,18 +129,10 @@ def main():
     )
     
     model = XGBClassifier(
-        n_estimators=2000,
-        learning_rate=0.02,
-        max_depth=6,
-        min_child_weight=1,
-        subsample=0.9,
-        colsample_bytree=0.9,
-        reg_lambda=1,
-        gamma=0,
-        objective="binary:logistic",
-        eval_metric="logloss",
-        tree_method="hist",
-        random_state=42
+        n_estimators=500,
+        learning_rate=0.1,
+        max_depth=8,
+        early_stopping_rounds=50
     )
     
     get_validation(X_train, y_train, model)
