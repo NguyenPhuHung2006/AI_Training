@@ -70,7 +70,7 @@ class Relu(Activation):
 class Softmax(Activation):
     def compute(self, z):
         z = z - np.max(z, axis=1, keepdims=True)
-        exp_z = np.exp(z)
+        exp_z = np.exp(np.clip(z, -500, 500))
         return exp_z / np.sum(exp_z, axis=1, keepdims=True)
 
     def derivative_from_a(self, a):
@@ -284,9 +284,9 @@ class NeuralNetwork:
                 
                 msg = [f"{i}\n"]
                 
-                msg.append(f"cost -> train:{train_loss:.4f}, validation:{val_loss:.4f}")
+                msg.append(f"cost -> train:{train_loss:.4f}, validation:{val_loss:.4f} ")
                 if train_acc is not None and val_acc is not None:
-                    msg.append(f"acc -> train:{train_acc * 100:.2f}%, validation:{val_acc * 100:.2f}%")
+                    msg.append(f"| acc -> train:{train_acc * 100:.2f}%, validation:{val_acc * 100:.2f}%")
 
                 print(''.join(msg))
                 
