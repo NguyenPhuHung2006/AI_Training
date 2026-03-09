@@ -71,7 +71,7 @@ class Relu(Activation):
 class Softmax(Activation):
     def compute(self, z):
         z = z - np.max(z, axis=1, keepdims=True)
-        exp_z = np.exp(z)
+        exp_z = np.exp(np.clip(z, -500, 500))
         return exp_z / np.sum(exp_z, axis=1, keepdims=True)
 
     def derivative_from_a(self, a):
@@ -285,9 +285,9 @@ class NeuralNetwork:
                 
                 msg = [f"{i}\n"]
                 
-                msg.append(f"cost -> train:{train_loss:.4f}, validation:{val_loss:.4f}")
+                msg.append(f"cost -> train:{train_loss:.4f}, validation:{val_loss:.4f} ")
                 if train_acc is not None and val_acc is not None:
-                    msg.append(f"acc -> train:{train_acc * 100:.2f}%, validation:{val_acc * 100:.2f}%")
+                    msg.append(f"| acc -> train:{train_acc * 100:.2f}%, validation:{val_acc * 100:.2f}%")
 
                 print(''.join(msg))
                 
@@ -797,21 +797,32 @@ def process_dates(df):
 
     df = df.assign(
         search_month = df["date_time"].dt.month,
-        stay_days = (df["srch_co"] - df["srch_ci"]).dt.days,
-        booking_lead = (df["srch_ci"] - df["date_time"]).dt.days
+        stay_days = (df["srch_co"] - df["srch_ci"]).dt.days.clip(lower=0),
+        booking_lead = (df["srch_ci"] - df["date_time"]).dt.days.clip(lower=0)
     )
 
     df = df.drop(["date_time", "srch_ci", "srch_co"], axis=1)
 
     return df
+
+def normalize(df_train, df_test):
+    df_train = df_train.copy()
+    df_test = df_test.copy()
+    binary_cols = ["is_mobile", "is_package"]
+    
+    for col in df_train.columns:
+        if df_train[col].dtype != "object" and col not in binary_cols:
+            mean = df_train[col].mean()
+            std = df_train[col].std()
+            df_train[col] = (df_train[col] - mean) / (std + 1e-8)
+            df_test[col] = (df_test[col] - mean) / (std + 1e-8)
+            
+    return df_train, df_test
     
 def read_data(train_path, test_path, dest_path):
-    df_train = pd.read_csv(train_path)
+    df_train = pd.read_csv(train_path, nrows=200000)
     df_test = pd.read_csv(test_path)
     df_dest = pd.read_csv(dest_path)
-    
-    df_train = df_train.sample(n=100000, random_state=42)
-    df_test = df_test.sample(n=10000, random_state=42)
     
     df_train = df_train.merge(df_dest, on="srch_destination_id", how="left")
     df_test = df_test.merge(df_dest, on="srch_destination_id", how="left")
@@ -821,13 +832,19 @@ def read_data(train_path, test_path, dest_path):
 
     y_train = df_train["hotel_cluster"]
 
-    drop_cols = ["hotel_cluster", "is_booking", "cnt"]
+    drop_cols = ["hotel_cluster", "is_booking", "cnt", "user_id"]
 
     df_train = df_train.drop(columns=drop_cols)
     df_test = df_test.drop(columns=drop_cols, errors="ignore")
+    df_test = df_test.drop(columns="id")
+    
+    df_train["orig_destination_distance"] = np.log1p(df_train["orig_destination_distance"])
+    df_test["orig_destination_distance"] = np.log1p(df_test["orig_destination_distance"])
 
     df_train = fill_na_median(df_train)
     df_test = fill_na_median(df_test)
+    
+    df_train, df_test = normalize(df_train, df_test)
     
     X_train = df_train.to_numpy()
     y_train = y_train.to_numpy()
@@ -838,6 +855,45 @@ def read_data(train_path, test_path, dest_path):
             
 def main():
     X_train, y_train, X_test = read_data("new_dataset/train.csv", "new_dataset/test.csv", "new_dataset/destinations.csv")
+        
+    print("data preprocessing completed")
+    # xg = GB_MultiClassification(
+    #     learning_rate=0.05,
+    #     max_depth=6,
+    #     min_child_weight=5,
+    #     min_samples_leaf=20,
+    #     n_classes=100,
+    #     sub_sample_size=0.8,
+    #     sub_feature_size=0.8,
+    #     lambda_=1.0,
+    #     gamma=0.1,
+    #     alpha=0.0,
+    #     n_trees=3
+    # )
+    
+    # xg.fit_with_validation(X_train, y_train)
+    
+    nn = NeuralNetwork(X_train.shape[1], CCE())
+    
+    nn.add_layer(512, Relu())
+    nn.add_layer(256, Relu())
+    nn.add_layer(128, Relu())
+    nn.add_layer(100, Softmax())
+    
+    n_classes = 100
+    y_onehot = np.zeros((y_train.size, n_classes))
+    y_onehot[np.arange(y_train.size), y_train] = 1
+    y_train = y_onehot
+    
+    nn.fit_with_validation(X_train, y_train, check_every=1)
+    
+    y_test = nn.predict(X_test)
+
+    top5 = np.argsort(-y_test, axis=1)[:, :5]
+    labels = np.apply_along_axis(lambda x: " ".join(map(str, x)), 1, top5)
+    
+    print(labels)
+    
         
 if __name__ == '__main__':
     main()
