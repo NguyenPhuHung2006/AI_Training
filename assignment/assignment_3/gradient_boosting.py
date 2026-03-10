@@ -123,7 +123,7 @@ def main():
         
     df = pd.DataFrame({
         "id": np.arange(0, len(labels)),
-        "labels": labels
+        "hotel_cluster": labels
     })
 
     df.to_csv("outputs/xgboost.csv", index=False)
