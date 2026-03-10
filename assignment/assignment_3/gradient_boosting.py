@@ -2,7 +2,8 @@ import numpy as np
 from abc import ABC, abstractmethod
 from sklearn.model_selection import train_test_split
 import pandas as pd
-from xgboost import XGBClassifier
+import xgboost as xgb
+from sklearn.model_selection import train_test_split
     
 def fill_na_median(df):
     df = df.copy()
@@ -44,7 +45,8 @@ def normalize(df_train, df_test):
     return df_train, df_test
     
 def read_data(train_path, test_path, dest_path):
-    df_train = pd.read_csv(train_path, nrows=200000)
+    df_train = pd.read_csv(train_path, nrows=500000)
+    # df_train = pd.read_csv(train_path)
     df_test = pd.read_csv(test_path)
     df_dest = pd.read_csv(dest_path)
     
@@ -82,26 +84,39 @@ def main():
         
     print("data preprocessing completed")
     
-    model = XGBClassifier(
-        tree_method="hist",
-        objective="multi:softprob",
-        num_class=100,
-        n_estimators=500,
-        max_depth=10,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        eval_metric="merror"
-    )
-
-    model.fit(
-        X_train,
-        y_train,
-        eval_set=[(X_train, y_train)],
-        verbose=True
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train, y_train, test_size=0.05, random_state=42
     )
     
-    y_test = model.predict_proba(X_test)
+    X_train = X_train.astype("float32")
+    X_val = X_val.astype("float32")
+    X_test = X_test.astype("float32")
+    
+    dtrain = xgb.DMatrix(X_train, label=y_train)
+    dval = xgb.DMatrix(X_val, label=y_val)
+    dtest = xgb.DMatrix(X_test)
+    
+    params = {
+        "objective": "multi:softprob",
+        "num_class": 100,
+        "tree_method": "hist",
+        "max_depth": 6,
+        "eta": 0.05,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "eval_metric": "merror",
+        "nthread": 4
+    }
+    
+    model = xgb.train(
+        params,
+        dtrain,
+        num_boost_round=1000,
+        evals=[(dtrain, "train"), (dval, "val")],
+        early_stopping_rounds=50
+    )
+    
+    y_test = model.predict(dtest)
 
     top5 = np.argsort(-y_test, axis=1)[:, :5]
     labels = np.apply_along_axis(lambda x: " ".join(map(str, x)), 1, top5)
