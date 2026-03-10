@@ -22,3 +22,6 @@ Copy of iSE Training.pdf
 
 # sound file
 *.wav
+
+# txt file
+*.txt

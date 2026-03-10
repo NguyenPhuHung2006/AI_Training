@@ -1,4 +1,0 @@
-gym
-jsonschema
-numpy
-scipy
