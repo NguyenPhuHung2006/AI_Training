@@ -2,6 +2,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from sklearn.model_selection import train_test_split
 import pandas as pd
+import os
 
 # =========================
 # Activations
@@ -348,7 +349,7 @@ def normalize(df_train, df_test):
     return df_train, df_test
     
 def read_data(train_path, test_path, dest_path):
-    df_train = pd.read_csv(train_path, nrows=500000)
+    df_train = pd.read_csv(train_path, nrows=670000)
     df_test = pd.read_csv(test_path)
     df_dest = pd.read_csv(dest_path)
     
@@ -379,8 +380,7 @@ def read_data(train_path, test_path, dest_path):
     y_train = y_train.to_numpy()
     X_test = df_test.astype("float32").to_numpy()
         
-    return X_train, y_train, X_test
-    
+    return X_train, y_train, X_test    
             
 def main():
     X_train, y_train, X_test = read_data("new_dataset/train.csv", "new_dataset/test.csv", "new_dataset/destinations.csv")
@@ -399,20 +399,40 @@ def main():
     model.add_layer(128, Relu())
     model.add_layer(100, Softmax())
     
-    model.fit_with_validation(X_train, y_train, check_every=5, n_iterations=1000, test_size=0.05, lr=0.001)
+    # retain the nn
+    model.load(f"nn_data/nn_numpy_0.npz")
+    
+    model.fit_with_validation(X_train, y_train, check_every=5, n_iterations=1000, test_size=0.05, lr=0.5)
     
     y_test = model.predict(X_test)
-    model.save("nn_data/nn_numpy")
+    
+    i = 0
+    nn_data_path = "nn_data"
+    
+    os.makedirs(nn_data_path, exist_ok=True)
+
+    while os.path.exists(f"{nn_data_path}/nn_numpy_{i}.npz"):
+        i += 1
+
+    model.save(f"{nn_data_path}/nn_numpy_{i}.npz")
 
     top5 = np.argsort(-y_test, axis=1)[:, :5]
     labels = np.apply_along_axis(lambda x: " ".join(map(str, x)), 1, top5)
         
     df = pd.DataFrame({
         "id": np.arange(0, len(labels)),
-        "labels": labels
+        "hotel_cluster": labels
     })
+    
+    output_path = "outputs/nn"
+    
+    os.makedirs(output_path, exist_ok=True)
 
-    df.to_csv("outputs/neural_network.csv", index=False)
+    i = 0
+    while os.path.exists(f"{output_path}/nn_numpy_{i}.csv"):
+        i += 1
+
+    df.to_csv(f"{output_path}/nn_numpy_{i}.csv", index=False)
     
         
 if __name__ == '__main__':
