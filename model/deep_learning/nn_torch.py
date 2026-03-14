@@ -5,6 +5,11 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
+
+# =========================
+# Config
+# =========================
+
 COST_FUNCTIONS = {
     "cce": nn.CrossEntropyLoss,
     "mse": nn.MSELoss,
@@ -18,9 +23,72 @@ ACTIVATIONS = {
 }
 
 
+# =========================
+# Callback System
+# =========================
+
+class Callback:
+
+    def on_train_begin(self, trainer):
+        pass
+
+    def on_epoch_end(self, trainer, logs):
+        pass
+
+
+class EarlyStopping(Callback):
+
+    def __init__(self, patience=5):
+        self.patience = patience
+        self.best_loss = float("inf")
+        self.counter = 0
+
+    def on_epoch_end(self, trainer, logs):
+
+        val_loss = logs.get("val_loss")
+
+        if val_loss is None:
+            return
+
+        if val_loss < self.best_loss:
+            self.best_loss = val_loss
+            self.counter = 0
+        else:
+            self.counter += 1
+
+            if self.counter >= self.patience:
+                print("Early stopping triggered")
+                trainer.stop_training = True
+
+
+class ModelCheckpoint(Callback):
+
+    def __init__(self, path="best_model.pth"):
+        self.path = path
+        self.best_loss = float("inf")
+
+    def on_epoch_end(self, trainer, logs):
+
+        val_loss = logs.get("val_loss")
+
+        if val_loss is None:
+            return
+
+        if val_loss < self.best_loss:
+
+            self.best_loss = val_loss
+            trainer.save(self.path)
+
+            print(f"Saved best model → {self.path}")
+
+
+# =========================
+# Neural Network
+# =========================
+
 class NeuralNetwork(nn.Module):
 
-    def __init__(self, n_inputs, cost, lr=0.001, device=None):
+    def __init__(self, n_inputs, cost="cce", lr=0.001, device=None):
         super().__init__()
 
         self.n_inputs = n_inputs
@@ -30,17 +98,18 @@ class NeuralNetwork(nn.Module):
             "cuda" if torch.cuda.is_available() else "cpu"
         )
 
-        self.lr = lr
-
         if cost not in COST_FUNCTIONS:
             raise ValueError(f"Unknown cost function: {cost}")
 
         self.criterion = COST_FUNCTIONS[cost]()
+        self.lr = lr
 
         self.model = None
         self.optimizer = None
         self.scheduler = None
-        
+
+        self.stop_training = False
+
         self.history = {
             "train_loss": [],
             "val_loss": [],
@@ -48,9 +117,9 @@ class NeuralNetwork(nn.Module):
             "val_acc": []
         }
 
-    # -------------------------
+    # =========================
     # Architecture
-    # -------------------------
+    # =========================
 
     def add_layer(self, n_units, activation=None):
 
@@ -73,9 +142,9 @@ class NeuralNetwork(nn.Module):
             lr=self.lr
         )
 
-    # -------------------------
+    # =========================
     # Utilities
-    # -------------------------
+    # =========================
 
     def _to_tensor(self, X, y=None):
 
@@ -125,9 +194,9 @@ class NeuralNetwork(nn.Module):
             correct, total = acc
             return loss, correct / total
 
-    # -------------------------
+    # =========================
     # Training
-    # -------------------------
+    # =========================
 
     def fit(
         self,
@@ -135,12 +204,12 @@ class NeuralNetwork(nn.Module):
         y,
         epochs=100,
         batch_size=64,
-        check_every=1,
         val_split=0.0,
-        early_stopping=None,
         scheduler=None,
-        checkpoint_path=None
+        callbacks=None
     ):
+
+        callbacks = callbacks or []
 
         if val_split > 0:
             X_train, X_val, y_train, y_val = train_test_split(
@@ -166,10 +235,13 @@ class NeuralNetwork(nn.Module):
         if scheduler:
             self.scheduler = scheduler(self.optimizer)
 
-        best_val_loss = float("inf")
-        patience_counter = 0
+        for cb in callbacks:
+            cb.on_train_begin(self)
 
         for epoch in tqdm(range(epochs), desc="Training"):
+
+            if self.stop_training:
+                break
 
             self.model.train()
 
@@ -202,53 +274,45 @@ class NeuralNetwork(nn.Module):
                 self.scheduler.step()
 
             train_loss = total_loss / len(loader)
+            train_acc = train_correct / train_total if train_total > 0 else None
 
-            if epoch % check_every == 0:
-
-                msg = f"{epoch} | train_loss:{train_loss:.4f}"
-
-                if train_total > 0:
-                    train_acc = train_correct / train_total
-                    msg += f" | train_acc:{train_acc*100:.2f}%"
-
-                if X_val is not None:
-
-                    val_loss, val_acc = self._evaluate(X_val, y_val)
-
-                    msg += f" | val_loss:{val_loss:.4f}"
-
-                    if val_acc is not None:
-                        msg += f" | val_acc:{val_acc*100:.2f}%"
-
-                    if early_stopping:
-                        if val_loss < best_val_loss:
-                            best_val_loss = val_loss
-                            patience_counter = 0
-                            if checkpoint_path:
-                                self.save(checkpoint_path)
-                        else:
-                            patience_counter += 1
-
-                            if patience_counter >= early_stopping:
-                                print("Early stopping triggered")
-                                break
-
-                tqdm.write(msg)
-                
-            self.history["train_loss"].append(train_loss)
-
-            if train_total > 0:
-                self.history["train_acc"].append(train_acc)
+            val_loss = None
+            val_acc = None
 
             if X_val is not None:
-                self.history["val_loss"].append(val_loss)
+                val_loss, val_acc = self._evaluate(X_val, y_val)
 
-                if val_acc is not None:
-                    self.history["val_acc"].append(val_acc)
+            self.history["train_loss"].append(train_loss)
+            self.history["train_acc"].append(train_acc)
+            self.history["val_loss"].append(val_loss)
+            self.history["val_acc"].append(val_acc)
 
-    # -------------------------
+            logs = {
+                "train_loss": train_loss,
+                "train_acc": train_acc,
+                "val_loss": val_loss,
+                "val_acc": val_acc
+            }
+
+            for cb in callbacks:
+                cb.on_epoch_end(self, logs)
+
+            msg = f"{epoch} | train_loss:{train_loss:.4f}"
+
+            if train_acc is not None:
+                msg += f" | train_acc:{train_acc*100:.2f}%"
+
+            if val_loss is not None:
+                msg += f" | val_loss:{val_loss:.4f}"
+
+            if val_acc is not None:
+                msg += f" | val_acc:{val_acc*100:.2f}%"
+
+            tqdm.write(msg)
+
+    # =========================
     # Prediction
-    # -------------------------
+    # =========================
 
     def predict(self, X):
 
@@ -261,9 +325,9 @@ class NeuralNetwork(nn.Module):
 
         return outputs.cpu().numpy()
 
-    # -------------------------
+    # =========================
     # Model Summary
-    # -------------------------
+    # =========================
 
     def summary(self):
 
@@ -282,9 +346,9 @@ class NeuralNetwork(nn.Module):
         print("-" * 40)
         print(f"Total parameters: {total_params}\n")
 
-    # -------------------------
+    # =========================
     # Save / Load
-    # -------------------------
+    # =========================
 
     def save(self, path):
 
