@@ -81,9 +81,6 @@ class ModelCheckpoint(Callback):
             self.best_loss = val_loss
             trainer.save(self.path)
 
-            print(f"Saved best model → {self.path}")
-
-
 # =========================
 # Neural Network
 # =========================
@@ -394,6 +391,17 @@ def fill_na_median(df_train, df_test):
             
     return df_train, df_test
 
+def get_binary_cols(df):
+    binary_cols = []
+
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            unique_vals = df[col].dropna().unique()
+            if len(unique_vals) <= 2 and set(unique_vals).issubset({0,1}):
+                binary_cols.append(col)
+
+    return binary_cols
+
 def log_normalize(df, cols):
     df = df.copy(deep=False)
 
@@ -443,13 +451,10 @@ def read_data(train_path, test_path, dest_path):
     df_train = log_normalize(df_train, log_cols)
     df_test = log_normalize(df_test, log_cols)
     
-    std_cols = [
-        "orig_destination_distance",
-        "srch_adults_cnt",
-        "srch_children_cnt",
-        "srch_rm_cnt",
-        "cnt"
-    ]
+    # standardization all except the binary cols
+    binary_cols = get_binary_cols(df_train)
+    numeric_cols = df_train.select_dtypes(include=[np.number]).columns
+    std_cols = [c for c in numeric_cols if c not in binary_cols]
     
     df_train, df_test = standardization(df_train, df_test, std_cols)
     
@@ -468,38 +473,49 @@ def main():
         
     print("data preprocessing completed")
     
-    num_classes = 100
-    y_train = np.eye(num_classes)[y_train]
-    
+    print("NaNs:", np.isnan(X_train).sum())
+    print("Feature std mean:", X_train.std(axis=0).mean())
+    print("Unique labels:", len(np.unique(y_train)))
+
     model = NeuralNetwork(
         n_inputs=X_train.shape[1],
-        cost_function=CCE()
+        cost="cce",
+        lr=0.001
     )
     
-    model.add_layer(256, Relu())
-    model.add_layer(128, Relu())
-    model.add_layer(100, Softmax())
+    model.add_layer(256, "relu")
+    model.add_layer(128, "relu")
+    model.add_layer(100)
+
+    model.build()
     
-    # retain the nn
-    model.load(f"nn_data/nn_numpy_0.npz")
+    nn_data_path = "nn_data"
+    os.makedirs(nn_data_path, exist_ok=True)
     
-    model.fit_with_validation(X_train, y_train, check_every=5, n_iterations=1000, test_size=0.05, lr=0.5)
-    
+    model.fit(
+        X_train,
+        y_train,
+        epochs=20,
+        batch_size=512,
+        val_split=0.05,
+        callbacks=[
+            EarlyStopping(patience=3),
+            ModelCheckpoint(f"{nn_data_path}/best_model_torch.pth")
+        ]
+    )
+        
     y_test = model.predict(X_test)
     
-    i = 0
-    nn_data_path = "nn_data"
-    
-    os.makedirs(nn_data_path, exist_ok=True)
-
-    while os.path.exists(f"{nn_data_path}/nn_numpy_{i}.npz"):
-        i += 1
-
-    model.save(f"{nn_data_path}/nn_numpy_{i}.npz")
-
     top5 = np.argsort(-y_test, axis=1)[:, :5]
     labels = np.apply_along_axis(lambda x: " ".join(map(str, x)), 1, top5)
+    
+    i = 0
+    while os.path.exists(f"{nn_data_path}/nn_torch_{i}.pth"):
+        i += 1
+
+    model.save(f"{nn_data_path}/nn_torch_{i}.pth")
         
+    # save the result
     df = pd.DataFrame({
         "id": np.arange(0, len(labels)),
         "hotel_cluster": labels
@@ -510,10 +526,10 @@ def main():
     os.makedirs(output_path, exist_ok=True)
 
     i = 0
-    while os.path.exists(f"{output_path}/nn_numpy_{i}.csv"):
+    while os.path.exists(f"{output_path}/nn_torch_{i}.csv"):
         i += 1
 
-    df.to_csv(f"{output_path}/nn_numpy_{i}.csv", index=False)
+    df.to_csv(f"{output_path}/nn_torch_{i}.csv", index=False)
         
 if __name__ == '__main__':
     main()
