@@ -79,9 +79,6 @@ class ModelCheckpoint(Callback):
             self.best_loss = val_loss
             trainer.save(self.path)
 
-            print(f"Saved best model → {self.path}")
-
-
 # =========================
 # Neural Network
 # =========================
