@@ -425,14 +425,9 @@ def main():
     })
     
     output_path = "outputs/nn"
-    
     os.makedirs(output_path, exist_ok=True)
 
-    i = 0
-    while os.path.exists(f"{output_path}/nn_numpy_{i}.csv"):
-        i += 1
-
-    df.to_csv(f"{output_path}/nn_numpy_{i}.csv", index=False)
+    df.to_csv(f"{output_path}/nn_numpy.csv", index=False)
     
         
 if __name__ == '__main__':
