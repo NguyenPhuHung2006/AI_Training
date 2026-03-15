@@ -25,3 +25,6 @@ Copy of iSE Training.pdf
 
 # txt file
 *.txt
+
+# docx file
+*.docx
