@@ -18,10 +18,30 @@ COST_FUNCTIONS = {
 
 ACTIVATIONS = {
     "relu": nn.ReLU,
+    "leaky_relu": nn.LeakyReLU,
+    "gelu": nn.GELU,
+    "silu": nn.SiLU,
+    "tanh": nn.Tanh,
     "sigmoid": nn.Sigmoid,
-    "tanh": nn.Tanh
+    "elu": nn.ELU
 }
 
+INIT = {
+    "he": lambda w: nn.init.kaiming_uniform_(w),
+    "xavier": lambda w: nn.init.xavier_uniform_(w),
+    "normal": lambda w: nn.init.normal_(w, 0.0, 0.02)
+}
+
+NORMS = {
+    "batch": nn.BatchNorm1d,
+    "layer": nn.LayerNorm
+}
+
+DROPOUT = {
+    "standard": nn.Dropout,
+    "feature": nn.Dropout1d,
+    "alpha": nn.AlphaDropout
+}
 
 # =========================
 # Callback System
@@ -118,18 +138,48 @@ class NeuralNetwork(nn.Module):
     # Architecture
     # =========================
 
-    def add_layer(self, n_units, activation=None, dropout=0.0):
+    def add_layer(
+        self,
+        n_units,
+        activation=None,
+        dropout=0.0,
+        norm=None,
+        bias=True,
+        dropout_type="standard",
+        init=None
+    ):
+        
+        if norm == "batch":
+            bias = False
 
-        self.layers.append(nn.Linear(self.n_inputs, n_units))
+        # Linear layer
+        linear = nn.Linear(self.n_inputs, n_units, bias=bias)
+        self.layers.append(linear)
 
+        # Weight initialization
+        if init is not None:
+            if init not in INIT:
+                raise ValueError(f"Unknown init: {init}")
+            INIT[init](linear.weight)
+
+        # Normalization
+        if norm is not None:
+            if norm not in NORMS:
+                raise ValueError(f"Unknown norm: {norm}")
+            self.layers.append(NORMS[norm](n_units))
+
+        # Activation
         if activation:
             if activation not in ACTIVATIONS:
                 raise ValueError(f"Unknown activation: {activation}")
-
             self.layers.append(ACTIVATIONS[activation]())
-            
+
+        # Dropout
         if dropout > 0:
-            self.layers.append(nn.Dropout(dropout))
+            if dropout_type not in DROPOUT:
+                raise ValueError(f"Unknown dropout type: {dropout_type}")
+
+            self.layers.append(DROPOUT[dropout_type](dropout))
 
         self.n_inputs = n_units
 
@@ -149,15 +199,15 @@ class NeuralNetwork(nn.Module):
 
     def _to_tensor(self, X, y=None):
 
-        X = torch.tensor(X, dtype=torch.float32)
+        X = torch.as_tensor(X, dtype=torch.float32)
 
         if y is None:
             return X.to(self.device)
 
         if isinstance(self.criterion, nn.CrossEntropyLoss):
-            y = torch.tensor(y, dtype=torch.long)
+            y = torch.as_tensor(y, dtype=torch.long)
         else:
-            y = torch.tensor(y, dtype=torch.float32)
+            y = torch.as_tensor(y, dtype=torch.float32)
 
         return X.to(self.device), y.to(self.device)
 
@@ -227,7 +277,8 @@ class NeuralNetwork(nn.Module):
         loader = DataLoader(
             dataset,
             batch_size=batch_size,
-            shuffle=True
+            shuffle=True,
+            pin_memory=True
         )
 
         if X_val is not None:
@@ -259,6 +310,8 @@ class NeuralNetwork(nn.Module):
                 loss = self.criterion(outputs, y_batch)
 
                 loss.backward()
+                
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
 
                 self.optimizer.step()
 
@@ -271,7 +324,7 @@ class NeuralNetwork(nn.Module):
                     train_correct += correct
                     train_total += total
 
-            if self.scheduler:
+            if self.scheduler is not None:
                 self.scheduler.step()
 
             train_loss = total_loss / len(loader)
@@ -316,6 +369,9 @@ class NeuralNetwork(nn.Module):
     # =========================
 
     def predict(self, X):
+        
+        if self.model is None:
+            raise RuntimeError("Model not built. Call build() first.")
 
         self.model.eval()
 
@@ -353,12 +409,21 @@ class NeuralNetwork(nn.Module):
 
     def save(self, path):
 
-        torch.save(self.model.state_dict(), path)
+        torch.save({
+            "model_state": self.model.state_dict(),
+            "optimizer_state": self.optimizer.state_dict(),
+            "history": self.history
+        }, path)
 
     def load(self, path):
+        
+        checkpoint = torch.load(path, map_location=self.device)
 
-        self.model.load_state_dict(
-            torch.load(path, map_location=self.device)
-        )
+        self.model.load_state_dict(checkpoint["model_state"])
+
+        if "optimizer_state" in checkpoint and self.optimizer:
+            self.optimizer.load_state_dict(checkpoint["optimizer_state"])
+        if "history" in checkpoint:
+            self.history = checkpoint["history"]
 
         self.model.eval()
