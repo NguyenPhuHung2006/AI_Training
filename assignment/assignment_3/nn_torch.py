@@ -195,11 +195,10 @@ def main():
         lr=0.001,
         weight_decay=1e-4
     )
-    
-    model.add_layer(1024, "relu", dropout=0.3)
-    model.add_layer(512, "relu", dropout=0.3)
-    model.add_layer(256, "relu", dropout=0.2)
-    model.add_layer(128, "relu", dropout=0.1)
+
+    model.add_layer(512, activation="relu", norm="batch", dropout=0.3, init="he")
+    model.add_layer(256, activation="relu", norm="batch", dropout=0.2, init="he")
+    model.add_layer(128, activation="relu", norm="batch", dropout=0.1, init="he")
     model.add_layer(100)
 
     model.build()
@@ -229,7 +228,7 @@ def main():
     y_test = model.predict(X_test)
     top5 = np.argsort(-y_test, axis=1)[:, :5]
     for i in range(len(top5)):
-        if y_test[i].max() < 0.1:  # low confidence
+        if np.sum(y_test[i] > 0.05) < 5:  # low confidence
             top5[i] = top_clusters
     labels = np.apply_along_axis(lambda x: " ".join(map(str, x)), 1, top5)
         
