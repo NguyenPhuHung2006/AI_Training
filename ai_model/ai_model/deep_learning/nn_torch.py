@@ -278,7 +278,7 @@ class NeuralNetwork(nn.Module):
             dataset,
             batch_size=batch_size,
             shuffle=True,
-            pin_memory=True
+            pin_memory=torch.cuda.is_available()
         )
 
         if X_val is not None:
