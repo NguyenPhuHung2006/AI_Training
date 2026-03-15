@@ -1,0 +1,4 @@
+*.txt
+*.toml
+ai_models.egg-info/
+__pycache__/
