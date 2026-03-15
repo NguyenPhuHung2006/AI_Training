@@ -54,6 +54,45 @@ def log_normalize(df, cols):
 
     return df
 
+def one_hot_encode(df_train, df_test, cols):
+    df_train = df_train.copy(deep=False)
+    df_test = df_test.copy(deep=False)
+
+    df_train = pd.get_dummies(df_train, columns=cols)
+    df_test = pd.get_dummies(df_test, columns=cols)
+
+    # align columns between train and test
+    df_train, df_test = df_train.align(df_test, join="left", axis=1, fill_value=0)
+
+    return df_train, df_test
+
+def cluster_probability_features(df_train, df_test, group_col, prefix):
+    
+    df = df_train.copy(deep=False)
+
+    df["weight"] = df["is_booking"] * 4 + 1
+
+    counts = (
+        df.pivot_table(
+            index=group_col,
+            columns="hotel_cluster",
+            values="weight",
+            aggfunc="sum",
+            fill_value=0
+        )
+    )
+
+    probs = counts.div(counts.sum(axis=1), axis=0)
+
+    probs.columns = [f"{prefix}_cluster_{c}" for c in probs.columns]
+
+    df_train = df_train.merge(probs, on=group_col, how="left")
+    df_test = df_test.merge(probs, on=group_col, how="left")
+
+    df_train = df_train.fillna(0)
+    df_test = df_test.fillna(0)
+
+    return df_train, df_test
 
 def standardization(df_train, df_test, cols):
     df_train = df_train.copy(deep=False)
@@ -85,6 +124,20 @@ def read_data(train_path, test_path, dest_path):
     df_test = process_dates(df_test)
 
     y_train = df_train["hotel_cluster"]
+    cluster_features = [
+        ("srch_destination_id", "dest"),
+        ("hotel_market", "market"),
+        ("hotel_country", "country"),
+        ("user_location_country", "user_country"),
+        ("user_location_city", "user_city")
+    ]
+    for col, prefix in cluster_features:
+        df_train, df_test = cluster_probability_features(
+            df_train, df_test, col, prefix
+        )
+    
+    bookings = df_train[df_train["is_booking"] == 1]
+    top_clusters = bookings["hotel_cluster"].value_counts().index[:5].tolist()
 
     df_train = df_train.drop(columns=["hotel_cluster", "user_id"])
     df_test = df_test.drop(columns=["id", "user_id"])
@@ -97,6 +150,18 @@ def read_data(train_path, test_path, dest_path):
     # fill missing
     df_train, df_test = fill_na_median(df_train, df_test)
     
+    # one hot encoding 
+    categorical_cols = [
+        "site_name",
+        "posa_continent",
+        "srch_destination_type_id",
+        "hotel_continent",
+        "is_mobile",
+        "is_package",
+        "channel"
+    ]
+    df_train, df_test = one_hot_encode(df_train, df_test, categorical_cols)
+    
     # standardization all except the binary cols
     binary_cols = get_binary_cols(df_train)
     numeric_cols = df_train.select_dtypes(include=[np.number]).columns
@@ -104,22 +169,25 @@ def read_data(train_path, test_path, dest_path):
     
     df_train, df_test = standardization(df_train, df_test, std_cols)
             
-    df_test = df_test.reindex(columns=df_train.columns)
+    df_test = df_test.reindex(columns=df_train.columns, fill_value=0)
         
     X_train = df_train.astype("float32").to_numpy()
     y_train = y_train.to_numpy()
     X_test = df_test.astype("float32").to_numpy()
         
-    return X_train, y_train, X_test    
+    return X_train, y_train, X_test, top_clusters 
             
 def main():
-    X_train, y_train, X_test = read_data("new_dataset/train.csv", "new_dataset/test.csv", "new_dataset/destinations.csv")
+    X_train, y_train, X_test, top_clusters = read_data("new_dataset/train.csv", 
+                                                       "new_dataset/test.csv", 
+                                                       "new_dataset/destinations.csv")
         
     print("data preprocessing completed")
     
     print("NaNs:", np.isnan(X_train).sum())
     print("Feature std mean:", X_train.std(axis=0).mean())
     print("Unique labels:", len(np.unique(y_train)))
+    print("Feature count:", X_train.shape[1])
 
     model = NeuralNetwork(
         n_inputs=X_train.shape[1],
@@ -127,7 +195,6 @@ def main():
         lr=0.001,
         weight_decay=1e-4
     )
-    print(model.weight_decay)
     
     model.add_layer(1024, "relu", dropout=0.3)
     model.add_layer(512, "relu", dropout=0.3)
@@ -144,10 +211,13 @@ def main():
     while os.path.exists(f"{nn_data_path}/nn_torch_{i}.pth"):
         i += 1
     
+    # reload the model
+    # model.load(f"{nn_data_path}/nn_torch_{i - 1}.pth")
+        
     model.fit(
         X_train,
         y_train,
-        epochs=100,
+        epochs=200,
         batch_size=512,
         val_split=0.05,
         callbacks=[
@@ -157,8 +227,10 @@ def main():
     )
         
     y_test = model.predict(X_test)
-    
     top5 = np.argsort(-y_test, axis=1)[:, :5]
+    for i in range(len(top5)):
+        if y_test[i].max() < 0.1:  # low confidence
+            top5[i] = top_clusters
     labels = np.apply_along_axis(lambda x: " ".join(map(str, x)), 1, top5)
         
     # save the result
