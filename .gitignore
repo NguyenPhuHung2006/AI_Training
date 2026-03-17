@@ -28,3 +28,7 @@ Copy of iSE Training.pdf
 
 # docx file
 *.docx
+
+# picture file
+*.png
+*.jpg
