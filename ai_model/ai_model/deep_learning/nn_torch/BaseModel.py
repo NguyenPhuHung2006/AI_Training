@@ -62,7 +62,16 @@ class BaseModel(nn.Module):
             "val_acc": []
         }
 
-    def _apply_utils(self, module, activation, dropout, dropout_type, norm, norm_dim, init):
+    def _apply_utils(
+        self,
+        module,
+        activation="relu",
+        dropout=0.0,
+        dropout_type="standard",
+        norm=None,
+        norm_dim=None,
+        init=None
+    ):
         layer_group = [module]
         if norm:
             layer_group.append(self.configs["norm"][norm](norm_dim))
@@ -82,15 +91,23 @@ class BaseModel(nn.Module):
 
     def build(self):
         self.model = nn.Sequential(*self.layers).to(self.device)
-        self.optimizer = optim.Adam(
-            self.model.parameters(),
-            lr=self.lr,
-            weight_decay=self.weight_decay
-        )
+        
+        main_params = list(self.model.parameters())
+        embed_params = list(self.embeddings.parameters()) if hasattr(self, 'embeddings') else []
+        
+        if embed_params:
+            params_to_train = [
+                {'params': main_params, 'lr': self.lr},
+                {'params': embed_params, 'lr': self.lr * 10} 
+            ]
+        else:
+            params_to_train = main_params
+            
+        self.optimizer = optim.Adam(params_to_train, weight_decay=self.weight_decay)
         return self
 
     def _to_tensor(self, X, y=None):
-        X = torch.as_tensor(X, dtype=torch.float32).to(self.device)
+        X = torch.as_tensor(X).to(self.device)
         if y is None:
             return X
         if isinstance(self.criterion, nn.CrossEntropyLoss):
@@ -103,7 +120,7 @@ class BaseModel(nn.Module):
         if isinstance(self.criterion, nn.CrossEntropyLoss):
             preds = torch.argmax(outputs, dim=1)
         elif isinstance(self.criterion, nn.BCEWithLogitsLoss):
-            preds = (torch.sigmoid(outputs) > 0.5).float()
+            preds = (torch.sigmoid(outputs) > 0.5).view_as(y).float()
         else:
             return None
 
@@ -116,7 +133,7 @@ class BaseModel(nn.Module):
         self.model.eval()
 
         with torch.no_grad():
-            outputs = self.model(X)
+            outputs = self(X)
             loss = self.criterion(outputs, y).item()
             acc = self._accuracy(outputs, y)
             if acc is None:
@@ -128,7 +145,8 @@ class BaseModel(nn.Module):
         callbacks = callbacks or []
         if val_split > 0:
             X_train, X_val, y_train, y_val = train_test_split(
-                X, y, test_size=val_split
+                X, y, test_size=val_split, random_state=42, 
+                stratify=y if isinstance(self.criterion, nn.CrossEntropyLoss) else None
             )
         else:
             X_train, y_train = X, y
@@ -161,10 +179,10 @@ class BaseModel(nn.Module):
             
             for xb, yb in loader:
                 self.optimizer.zero_grad()
-                out = self.model(xb)
+                out = self(xb)
                 loss = self.criterion(out, yb)
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
                 self.optimizer.step()
                 total_loss += loss.item()
                 acc = self._accuracy(out, yb)
@@ -174,7 +192,10 @@ class BaseModel(nn.Module):
                     train_total += total
                     
             if self.scheduler is not None:
-                self.scheduler.step()
+                if isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+                    self.scheduler.step(val_loss if val_loss is not None else train_loss)
+                else:
+                    self.scheduler.step()
                 
             train_loss = total_loss / len(loader)
             train_acc = train_correct / train_total if train_total > 0 else None
@@ -219,13 +240,18 @@ class BaseModel(nn.Module):
         X = self._to_tensor(X)
         
         with torch.no_grad():
-            outputs = self.model(X)
+            outputs = self(X)
             
         return outputs.cpu().numpy()
     
     def save(self, path):
+        embeddings_state = None
+        if hasattr(self, 'embeddings'):
+            embeddings_state = self.embeddings.state_dict()
+            
         torch.save({
             "model_state": self.model.state_dict(),
+            "embeddings_state": embeddings_state,
             "optimizer_state": self.optimizer.state_dict(),
             "history": self.history
         }, path)
@@ -233,6 +259,12 @@ class BaseModel(nn.Module):
     def load(self, path):
         checkpoint = torch.load(path, map_location=self.device)
         self.model.load_state_dict(checkpoint["model_state"])
+        
+        if "embeddings_state" in checkpoint and checkpoint["embeddings_state"] is not None:
+            if hasattr(self, 'embeddings'):
+                self.embeddings.load_state_dict(checkpoint["embeddings_state"])
+            else:
+                print("Warning: Checkpoint has embeddings, but current model does not.")
         
         if "optimizer_state" in checkpoint and self.optimizer:
             self.optimizer.load_state_dict(checkpoint["optimizer_state"])

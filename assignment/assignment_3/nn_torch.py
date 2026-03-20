@@ -55,18 +55,6 @@ def log_normalize(df, cols):
 
     return df
 
-def one_hot_encode(df_train, df_test, cols):
-    df_train = df_train.copy(deep=False)
-    df_test = df_test.copy(deep=False)
-
-    df_train = pd.get_dummies(df_train, columns=cols)
-    df_test = pd.get_dummies(df_test, columns=cols)
-
-    # align columns between train and test
-    df_train, df_test = df_train.align(df_test, join="left", axis=1, fill_value=0)
-
-    return df_train, df_test
-
 def cluster_probability_features(df_train, df_test, group_col, prefix):
     
     df = df_train.copy(deep=False)
@@ -114,7 +102,7 @@ def standardization(df_train, df_test, cols):
     return df_train, df_test
     
 def read_data(train_path, test_path, dest_path):
-    df_train = pd.read_csv(train_path, nrows=1000)
+    df_train = pd.read_csv(train_path)
     df_test = pd.read_csv(test_path)
     df_dest = pd.read_csv(dest_path)
     
@@ -140,8 +128,8 @@ def read_data(train_path, test_path, dest_path):
     bookings = df_train[df_train["is_booking"] == 1]
     top_clusters = bookings["hotel_cluster"].value_counts().index[:5].tolist()
 
-    df_train = df_train.drop(columns=["hotel_cluster", "user_id"])
-    df_test = df_test.drop(columns=["id", "user_id"])
+    df_train = df_train.drop(columns=["hotel_cluster"])
+    df_test = df_test.drop(columns=["id"])
     
     # log normalization
     log_cols = ["orig_destination_distance", "cnt"]
@@ -151,35 +139,36 @@ def read_data(train_path, test_path, dest_path):
     # fill missing
     df_train, df_test = fill_na_median(df_train, df_test)
     
-    # one hot encoding 
-    categorical_cols = [
-        "site_name",
-        "posa_continent",
-        "srch_destination_type_id",
-        "hotel_continent",
-        "is_mobile",
-        "is_package",
-        "channel"
-    ]
-    df_train, df_test = one_hot_encode(df_train, df_test, categorical_cols)
-    
     # standardization all except the binary cols
     binary_cols = get_binary_cols(df_train)
     numeric_cols = df_train.select_dtypes(include=[np.number]).columns
-    std_cols = [c for c in numeric_cols if c not in binary_cols]
+    embed_cols_name = [
+        "user_id",
+        "user_location_city",
+        "user_location_region",
+        "srch_destination_id",
+        "hotel_market",
+        "hotel_country"
+    ]
+    std_cols = [c for c in numeric_cols if c not in binary_cols and c not in embed_cols_name]
     
     df_train, df_test = standardization(df_train, df_test, std_cols)
-            
+    
     df_test = df_test.reindex(columns=df_train.columns, fill_value=0)
+    
+    embed_cols = [
+        (df_train.columns.get_loc(c), int(max(df_train[c].max(), df_test[c].max()) + 1))
+        for c in embed_cols_name
+    ]
         
-    X_train = df_train.astype("float32").to_numpy()
+    X_train = df_train.to_numpy()
     y_train = y_train.to_numpy()
-    X_test = df_test.astype("float32").to_numpy()
+    X_test = df_test.to_numpy()
         
-    return X_train, y_train, X_test, top_clusters 
+    return X_train, y_train, X_test, top_clusters, embed_cols
             
 def main():
-    X_train, y_train, X_test, top_clusters = read_data("new_dataset/train.csv", 
+    X_train, y_train, X_test, top_clusters, embed_cols = read_data("new_dataset/train.csv", 
                                                        "new_dataset/test.csv", 
                                                        "new_dataset/destinations.csv")
         
@@ -191,12 +180,19 @@ def main():
     print("Feature count:", X_train.shape[1])
 
     model = MLP(
-        input_dim=X_train.shape[1],
         cost="cce",
         lr=0.001,
         weight_decay=1e-4
     )
-
+    
+    for col_index, vocab_size in embed_cols:
+        model.add_embedding(col_index=col_index, vocab_size=vocab_size, embed_dim=8)
+        
+    embed_indices = [embed_col[0] for embed_col in embed_cols]
+    num_cols = [i for i in range(X_train.shape[1]) if i not in embed_indices]
+    
+    model.set_numerical_cols(num_cols)
+    
     model.add_layer(512, activation="relu", norm="batch", dropout=0.3, init="he")
     model.add_layer(256, activation="relu", norm="batch", dropout=0.2, init="he")
     model.add_layer(128, activation="relu", norm="batch", dropout=0.1, init="he")
@@ -217,7 +213,7 @@ def main():
     model.fit(
         X_train,
         y_train,
-        epochs=2,
+        epochs=200,
         batch_size=512,
         val_split=0.05,
         callbacks=[
