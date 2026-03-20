@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 import os
-from ai_model.deep_learning.nn_torch import *
+from ai_model.deep_learning.nn_torch import MLP
+from ai_model.deep_learning.nn_torch.callback import EarlyStopping, ModelCheckpoint
 
 def process_dates(df):
     df = df.copy(deep=False)
@@ -113,7 +114,7 @@ def standardization(df_train, df_test, cols):
     return df_train, df_test
     
 def read_data(train_path, test_path, dest_path):
-    df_train = pd.read_csv(train_path)
+    df_train = pd.read_csv(train_path, nrows=1000)
     df_test = pd.read_csv(test_path)
     df_dest = pd.read_csv(dest_path)
     
@@ -189,8 +190,8 @@ def main():
     print("Unique labels:", len(np.unique(y_train)))
     print("Feature count:", X_train.shape[1])
 
-    model = NeuralNetwork(
-        n_inputs=X_train.shape[1],
+    model = MLP(
+        input_dim=X_train.shape[1],
         cost="cce",
         lr=0.001,
         weight_decay=1e-4
@@ -216,7 +217,7 @@ def main():
     model.fit(
         X_train,
         y_train,
-        epochs=200,
+        epochs=2,
         batch_size=512,
         val_split=0.05,
         callbacks=[

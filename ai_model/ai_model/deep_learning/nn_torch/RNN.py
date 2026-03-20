@@ -1,4 +1,4 @@
-import BaseModel
+from .BaseModel import BaseModel
 import torch.nn as nn
 
 class RNN(BaseModel):
