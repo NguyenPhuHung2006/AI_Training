@@ -19,6 +19,7 @@ class RNN(BaseModel):
         )
         self.layers.append(rnn)
         self.input_size = hidden_size * (2 if bidirectional else 1)
+        return self
 
     def forward(self, x):
         # RNNs need a custom forward because they return (output, state)

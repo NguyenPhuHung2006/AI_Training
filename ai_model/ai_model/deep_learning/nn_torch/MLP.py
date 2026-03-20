@@ -11,3 +11,4 @@ class MLP(BaseModel):
         block = self._apply_utils(linear, activation, dropout, "standard", norm, n_units, init)
         self.layers.append(block)
         self.current_dim = n_units
+        return self

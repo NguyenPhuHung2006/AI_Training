@@ -13,10 +13,13 @@ class CNN(BaseModel):
         block = self._apply_utils(conv, activation, dropout, "standard", norm, out_channels, init)
         self.layers.append(block)
         self.current_channels = out_channels
+        return self
         
     def add_pool(self, pool_type="max", kernel_size=2, stride=2):
         pool_layer = self.pool_types[pool_type](kernel_size=kernel_size, stride=stride)
         self.layers.append(pool_layer)
+        return self
         
     def add_flatten(self):
         self.layers.append(nn.Flatten())
+        return self
