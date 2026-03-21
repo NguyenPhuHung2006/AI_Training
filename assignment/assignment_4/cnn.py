@@ -1,42 +1,99 @@
 import numpy as np
 import pandas as pd
-import requests
-from PIL import Image
-from io import BytesIO
-from sklearn.preprocessing import LabelEncoder
 from ai_model.deep_learning.nn_torch import CNN
+from ai_model.deep_learning.nn_torch import MLP
 from ai_model.deep_learning.nn_torch.callback import EarlyStopping, ModelCheckpoint
+import matplotlib.pyplot as plt
+import os
 
-def url_to_matrix(url, size):
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=5)
-        img = Image.open(BytesIO(response.content)).convert('RGB')
-        img = img.resize(size)
-        return np.array(img).astype('float32') / 255.0
-    except Exception as e:
-        return np.zeros((size[0], size[1], 3), dtype='float32')
+def plot_img(X, index):
+    first_image = X[index].astype(np.float32)  # ensure compatible dtype
 
-def read_data(train_path, test_path, img_size=(64, 64)):
-    df_train = pd.read_csv(train_path, encoding='latin1')
-    df_test = pd.read_csv(test_path, encoding='latin1')
-    
-    print("Downloading and processing training images...")
-    X_train = np.array([url_to_matrix(url, img_size) for url in df_train['url_thumbnail']])
-    
-    print("Downloading and processing test images...")
-    X_test = np.array([url_to_matrix(url, img_size) for url in df_test['url_thumbnail']])
-    
-    print(X_train.shape)
+    # If grayscale
+    if first_image.ndim == 3 and first_image.shape[2] == 1:
+        first_image = first_image[:, :, 0]
 
-    le = LabelEncoder()
-    y_train = le.fit_transform(df_train['label'])
-    
-    return X_train, y_train, X_test, len(le.classes_)
-    
+    plt.imshow(first_image, cmap="gray" if first_image.ndim == 2 else None)
+    plt.axis("off")
+    plt.show()
 
 def main():
-    X_train, y_train, X_test = read_data("data/train.csv", "data/test.csv")
+    
+    X_train_empty_indices = [94, 5313, 7655, 7932, 10878, 10920, 11036, 14827, 16820, 17286, 17397, 17483, 18601, 19430]
+    X_test_empty_indices = [1151, 1255, 3044, 4237, 4427, 4709]
+
+    X_train = np.load("data/X_train.npy")
+    X_test = np.load("data/X_test.npy")
+    y_train = pd.read_csv("data/train.csv", usecols=["label"])
+    
+    X_train = np.delete(X_train, X_train_empty_indices, axis=0)
+    y_train = y_train.drop(index=X_train_empty_indices).reset_index(drop=True)
+    
+    unique_labels = sorted(y_train["label"].unique())
+
+    # Number of classes
+    n_classes = len(unique_labels)
+
+    # Create dictionary: integer ID -> label text
+    label_dict = {i: label for i, label in enumerate(unique_labels)}
+
+    # Reverse mapping: label text -> integer ID
+    text_to_int = {label: i for i, label in enumerate(unique_labels)}
+
+    # Map y_train labels to integer IDs
+    y_labels = y_train["label"].map(text_to_int).values  # NumPy array of ints
+
+    model = CNN(
+        in_channels=3,
+        input_size=(X_train.shape[1], X_train.shape[2]),
+        cost="cce",
+        weight_decay=1e-4
+    )
+    
+    # Conv Block 1
+    model.add_filter(out_channels=32, kernel_size=3, stride=1, padding=1, activation="relu", dropout=0.0)
+    model.add_pool(pool_type="max", kernel_size=2, stride=2)  # 128 -> 64
+
+    # Conv Block 2
+    model.add_filter(out_channels=64, kernel_size=3, stride=1, padding=1, activation="relu", dropout=0.0)
+    model.add_pool(pool_type="max", kernel_size=2, stride=2)  # 64 -> 32
+
+    # Conv Block 3
+    model.add_filter(out_channels=128, kernel_size=3, stride=1, padding=1, activation="relu", dropout=0.0)
+    model.add_pool(pool_type="max", kernel_size=2, stride=2)  # 32 -> 16
+
+    # Optional Conv Block 4
+    model.add_filter(out_channels=256, kernel_size=3, stride=1, padding=1, activation="relu", dropout=0.0)
+    model.add_pool(pool_type="max", kernel_size=2, stride=2)  # 16 -> 8
+    
+    model.add_flatten()
+
+    model.add_fc(out_features=512, activation="relu", dropout=0.5)
+    model.add_fc(out_features=256, activation="relu", dropout=0.5)
+
+    model.add_fc(out_features=n_classes, activation=None, dropout=0.0)
+    
+    model.build()
+    
+    nn_data_path = "nn_data"
+    os.makedirs(nn_data_path, exist_ok=True)
+    
+    i = 0
+    while os.path.exists(f"{nn_data_path}/nn_torch_{i}.pth"):
+        i += 1
+            
+    model.fit(
+        X_train, 
+        y_labels, 
+        epochs=200,
+        batch_size=64,
+        val_split=0.1,
+        callbacks=[
+            EarlyStopping(patience=10),
+            ModelCheckpoint(f"{nn_data_path}/nn_torch_{i}.pth")
+        ]
+    )
+    
 
 if __name__ == "__main__":
     main()
