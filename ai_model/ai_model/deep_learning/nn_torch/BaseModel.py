@@ -101,7 +101,7 @@ class BaseModel(nn.Module):
                 {'params': embed_params, 'lr': self.lr * 10} 
             ]
         else:
-            params_to_train = main_params
+            params_to_train = [{'params': main_params, 'lr': self.lr}]
             
         self.optimizer = optim.Adam(params_to_train, weight_decay=self.weight_decay)
         return self
