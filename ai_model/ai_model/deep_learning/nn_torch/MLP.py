@@ -31,11 +31,16 @@ class MLP(BaseModel):
 
     def forward(self, x):
         features = []
-        for col in self.cat_cols:
-            features.append(self.embeddings[str(col)](x[:, col].long()))
-        
+
+        if self.embeddings:
+            for col in self.cat_cols:
+                features.append(self.embeddings[str(col)](x[:, col].long()))
+
         if self.num_cols:
             features.append(x[:, self.num_cols].float())
-        
+
+        if len(features) == 0:
+            raise ValueError("No features to pass to model!")
+
         x_combined = torch.cat(features, dim=1) if len(features) > 1 else features[0]
         return self.model(x_combined)
