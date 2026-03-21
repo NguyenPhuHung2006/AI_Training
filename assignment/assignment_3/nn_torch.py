@@ -128,8 +128,8 @@ def read_data(train_path, test_path, dest_path):
     bookings = df_train[df_train["is_booking"] == 1]
     top_clusters = bookings["hotel_cluster"].value_counts().index[:5].tolist()
 
-    df_train = df_train.drop(columns=["hotel_cluster"])
-    df_test = df_test.drop(columns=["id"])
+    df_train = df_train.drop(columns=["hotel_cluster", "user_id"])
+    df_test = df_test.drop(columns=["id", "user_id"])
     
     # log normalization
     log_cols = ["orig_destination_distance", "cnt"]
@@ -143,7 +143,6 @@ def read_data(train_path, test_path, dest_path):
     binary_cols = get_binary_cols(df_train)
     numeric_cols = df_train.select_dtypes(include=[np.number]).columns
     embed_cols_name = [
-        "user_id",
         "user_location_city",
         "user_location_region",
         "srch_destination_id",
@@ -174,28 +173,37 @@ def main():
         
     print("data preprocessing completed")
     
+    embed_indices = [idx for idx, _ in embed_cols]
+    
     print("NaNs:", np.isnan(X_train).sum())
-    print("Feature std mean:", X_train.std(axis=0).mean())
+    print("Feature std mean:", 
+        np.array([X_train[:, i] for i in range(X_train.shape[1]) if i not in embed_indices]).std(axis=0).mean()
+    )
     print("Unique labels:", len(np.unique(y_train)))
     print("Feature count:", X_train.shape[1])
 
     model = MLP(
         cost="cce",
-        lr=0.001,
+        lr=0.002,
         weight_decay=1e-4
     )
     
     for col_index, vocab_size in embed_cols:
-        model.add_embedding(col_index=col_index, vocab_size=vocab_size, embed_dim=8)
+        if vocab_size > 10000:
+            d = 32
+        elif vocab_size > 1000:
+            d = 16
+        else:
+            d = 8
+        model.add_embedding(col_index=col_index, vocab_size=vocab_size, embed_dim=d)
         
-    embed_indices = [embed_col[0] for embed_col in embed_cols]
     num_cols = [i for i in range(X_train.shape[1]) if i not in embed_indices]
     
     model.set_numerical_cols(num_cols)
     
-    model.add_layer(512, activation="relu", norm="batch", dropout=0.3, init="he")
-    model.add_layer(256, activation="relu", norm="batch", dropout=0.2, init="he")
-    model.add_layer(128, activation="relu", norm="batch", dropout=0.1, init="he")
+    model.add_layer(512, activation="relu", norm="batch", dropout=0.4, init="he")
+    model.add_layer(256, activation="relu", norm="batch", dropout=0.3, init="he")
+    model.add_layer(128, activation="relu", norm="batch", dropout=0.2, init="he")
     model.add_layer(100)
 
     model.build()
@@ -214,19 +222,26 @@ def main():
         X_train,
         y_train,
         epochs=200,
-        batch_size=512,
-        val_split=0.05,
+        batch_size=4096,
+        val_split=0.1,
         callbacks=[
-            EarlyStopping(patience=15),
+            EarlyStopping(patience=10),
             ModelCheckpoint(f"{nn_data_path}/nn_torch_{i}.pth")
         ]
     )
         
     y_test = model.predict(X_test)
     top5 = np.argsort(-y_test, axis=1)[:, :5]
+    total_replacement = 0
     for i in range(len(top5)):
-        if np.sum(y_test[i] > 0.05) < 5:  # low confidence
+        probs = y_test[i]
+        sorted_probs = np.sort(probs)[::-1]
+        if probs.max() < 0.2 or (sorted_probs[0] - sorted_probs[1]) < 0.05:
             top5[i] = top_clusters
+            total_replacement += 1
+    
+    print(f"Total number of replacement is {total_replacement}")
+            
     labels = np.apply_along_axis(lambda x: " ".join(map(str, x)), 1, top5)
         
     # save the result
