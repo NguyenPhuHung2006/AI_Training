@@ -161,7 +161,8 @@ class BaseModel(nn.Module):
             dataset,
             batch_size=batch_size,
             shuffle=True,
-            pin_memory=torch.cuda.is_available()
+            pin_memory=torch.cuda.is_available(),
+            num_workers=4
         )
         
         for cb in callbacks:
@@ -190,12 +191,6 @@ class BaseModel(nn.Module):
                     correct, total = acc
                     train_correct += correct
                     train_total += total
-                    
-            if self.scheduler is not None:
-                if isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
-                    self.scheduler.step(val_loss if val_loss is not None else train_loss)
-                else:
-                    self.scheduler.step()
                 
             train_loss = total_loss / len(loader)
             train_acc = train_correct / train_total if train_total > 0 else None
@@ -204,6 +199,12 @@ class BaseModel(nn.Module):
             val_acc = None
             if X_val is not None:
                 val_loss, val_acc = self._evaluate(X_val, y_val)
+                
+            if self.scheduler is not None:
+                if isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+                    self.scheduler.step(val_loss if val_loss is not None else train_loss)
+                else:
+                    self.scheduler.step()
                 
             # callback
             self.history["train_loss"].append(train_loss)
