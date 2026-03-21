@@ -117,15 +117,17 @@ class BaseModel(nn.Module):
         return X, torch.as_tensor(y, dtype=y_dtype).to(self.device)
     
     def _accuracy(self, outputs, y):
+        total = None
         if isinstance(self.criterion, nn.CrossEntropyLoss):
             preds = torch.argmax(outputs, dim=1)
+            total = y.size(0)
         elif isinstance(self.criterion, nn.BCEWithLogitsLoss):
             preds = (torch.sigmoid(outputs) > 0.5).view_as(y).float()
+            total = y.numel()
         else:
             return None
 
-        correct = (preds == y).sum().item()
-        total = y.size(0)
+        correct = (preds == y.to(preds.dtype)).sum().item()
 
         return correct, total
 
