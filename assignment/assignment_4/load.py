@@ -138,7 +138,15 @@ def build_dataset(train_csv, test_csv, img_size=(128, 128), max_workers=3):
 
     # ===== TEST =====
     print("\nLoading test data...")
-    df_test = pd.read_csv(test_csv)
+    with open("data/test.csv", "rb") as f:
+        raw = f.read()
+
+    # Replace problematic bytes with a placeholder
+    text = raw.decode("utf-8", errors="replace")  # or errors="ignore"
+    with open("data/test_fixed.csv", "w", encoding="utf-8") as f:
+        f.write(text)
+
+    df_test = pd.read_csv("data/test_fixed.csv")
 
     X_test, failed_test = process_dataframe(df_test, img_size, max_workers)
     test_ids = df_test["ID"].values
