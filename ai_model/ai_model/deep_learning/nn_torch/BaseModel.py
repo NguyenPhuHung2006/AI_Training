@@ -65,7 +65,7 @@ class BaseModel(nn.Module):
     def _apply_utils(
         self,
         module,
-        activation="relu",
+        activation=None,
         dropout=0.0,
         dropout_type="standard",
         norm=None,

@@ -204,7 +204,7 @@ def main():
     model.add_layer(512, activation="relu", norm="batch", dropout=0.4, init="he")
     model.add_layer(256, activation="relu", norm="batch", dropout=0.3, init="he")
     model.add_layer(128, activation="relu", norm="batch", dropout=0.2, init="he")
-    model.add_layer(100)
+    model.add_layer(100, init="xavier")
 
     model.build()
     
