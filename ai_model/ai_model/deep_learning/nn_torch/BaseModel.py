@@ -107,7 +107,7 @@ class BaseModel(nn.Module):
         return self
 
     def _to_tensor(self, X, y=None):
-        X = torch.as_tensor(X).to(self.device)
+        X = torch.as_tensor(X).to(self.device).float()
         if y is None:
             return X
         if isinstance(self.criterion, nn.CrossEntropyLoss):
