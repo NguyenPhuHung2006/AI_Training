@@ -9,16 +9,13 @@ def resize_batch(X, size=(64, 64)):
     return X.numpy()
 
 # Load original
-X_train = np.load("npz/128/X_train.npy")
-X_test = np.load("npz/128/X_test.npy")
+X_train = np.load("data/npz/128/X_train.npy")
+X_test = np.load("data/npz/128/X_test.npy")
 
 # Resize
 X_train_64 = resize_batch(X_train, (64, 64))
 X_test_64 = resize_batch(X_test, (64, 64))
 
-# Optional: convert to uint8 to save space
-X_train_64 = X_train_64.astype(np.uint8)
-X_test_64 = X_test_64.astype(np.uint8)
-
 # Save as npz
-np.savez_compressed("npz/data_64.npz", X_train=X_train_64, X_test=X_test_64)
+np.savez_compressed("data/npz/data_64.npz", X_train=X_train_64, X_test=X_test_64)
+print("completed")
