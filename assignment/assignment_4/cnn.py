@@ -16,6 +16,44 @@ def plot_img(X, index):
     plt.imshow(first_image, cmap="gray" if first_image.ndim == 2 else None)
     plt.axis("off")
     plt.show()
+    
+def conv_block(model, out_channels, dropout):
+    model.add_filter(
+        out_channels=out_channels,
+        kernel_size=3,
+        stride=1,
+        padding=1,
+        activation="relu",
+        norm="batch2d",
+        dropout=dropout
+    )
+    model.add_pool(pool_type="max", kernel_size=2, stride=2)
+    
+def build_cnn(model, n_classes, size="128"):
+    if size == "128":
+        channels = [32, 64, 128, 256]
+        dropouts = [0.1, 0.1, 0.15, 0.2]
+        fc_layers = [512, 256]
+
+    elif size == "64":
+        channels = [32, 64, 128, 128]
+        dropouts = [0.1, 0.1, 0.15, 0.2]
+        fc_layers = [128]
+
+    else:
+        raise ValueError("size must be '128' or '64'")
+
+    # Conv blocks
+    for ch, dr in zip(channels, dropouts):
+        conv_block(model, ch, dr)
+
+    model.add_flatten()
+
+    # FC layers
+    for units in fc_layers:
+        model.add_fc(n_units=units, activation="relu", dropout=0.5)
+
+    model.add_fc(n_units=n_classes)
 
 def main():
     
@@ -56,59 +94,7 @@ def main():
         weight_decay=1e-4
     )
     
-    # Conv Block 1
-    model.add_filter(
-        out_channels=32,
-        kernel_size=3,
-        stride=1,
-        padding=1,
-        activation="relu",
-        norm="batch2d",
-        dropout=0.1
-    )
-    model.add_pool(pool_type="max", kernel_size=2, stride=2)  # 128 -> 64
-
-    # Conv Block 2
-    model.add_filter(
-        out_channels=64,
-        kernel_size=3,
-        stride=1,
-        padding=1,
-        activation="relu",
-        norm="batch2d",
-        dropout=0.1
-    )
-    model.add_pool(pool_type="max", kernel_size=2, stride=2)  # 64 -> 32
-
-    # Conv Block 3
-    model.add_filter(
-        out_channels=128,
-        kernel_size=3,
-        stride=1,
-        padding=1,
-        activation="relu",
-        norm="batch2d",
-        dropout=0.15
-    )
-    model.add_pool(pool_type="max", kernel_size=2, stride=2)  # 32 -> 16
-
-    # Conv Block 4
-    model.add_filter(
-        out_channels=256,
-        kernel_size=3,
-        stride=1,
-        padding=1,
-        activation="relu",
-        norm="batch2d",
-        dropout=0.2
-    )
-    model.add_pool(pool_type="max", kernel_size=2, stride=2)  # 16 -> 8
-
-    model.add_flatten()
-
-    model.add_fc(n_units=512, activation="relu", dropout=0.5)
-    model.add_fc(n_units=256, activation="relu", dropout=0.5)
-    model.add_fc(n_units=n_classes)
+    build_cnn(model, n_classes, size="64")
     
     model.build()
     
