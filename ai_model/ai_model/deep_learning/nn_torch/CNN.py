@@ -13,11 +13,10 @@ class CNN(BaseModel):
             "avg": nn.AvgPool2d
         }
 
-    def add_filter(self, out_channels, kernel_size=3, stride=1, padding=1,
-                  activation="relu", dropout=0.0, norm=None, init="he"):
+    def add_filter(self, out_channels, kernel_size=3, stride=1, padding=1, **kwargs):
         conv = nn.Conv2d(self.current_channels, out_channels, kernel_size, stride, padding)
         
-        block = self._apply_utils(conv, activation, dropout, "standard", norm, out_channels, init)
+        block = self._apply_utils(conv, **kwargs, norm_dim=out_channels)
         self.layers.append(block)
 
         self.current_channels = out_channels
