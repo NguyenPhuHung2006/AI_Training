@@ -52,13 +52,13 @@ class CNN(BaseModel):
 
         return self
 
-    def add_fc(self, out_features, activation="relu", dropout=0.0):
+    def add_fc(self, n_units, **kwargs):
         if self.flatten_dim is None:
             raise ValueError("Call add_flatten() before add_fc()")
-        fc = nn.Linear(self.flatten_dim, out_features)
-        block = self._apply_utils(fc, activation, dropout, "standard", None, out_features, "he")
+        fc = nn.Linear(self.flatten_dim, n_units)
+        block = self._apply_utils(fc, **kwargs, norm_dim=n_units)
         self.layers.append(block)
-        self.flatten_dim = out_features
+        self.flatten_dim = n_units
         return self
 
     def forward(self, x):

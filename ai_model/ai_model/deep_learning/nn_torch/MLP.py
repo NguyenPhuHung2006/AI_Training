@@ -25,7 +25,8 @@ class MLP(BaseModel):
 
     def add_layer(self, n_units, **kwargs):
         layer = nn.Linear(self.current_dim, n_units)
-        self.layers.append(self._apply_utils(layer, **kwargs, norm_dim=n_units))
+        block = self._apply_utils(layer, **kwargs, norm_dim=n_units)
+        self.layers.append(block)
         self.current_dim = n_units
         return self
 
