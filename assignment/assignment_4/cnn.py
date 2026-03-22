@@ -60,7 +60,7 @@ def main():
     X_train_empty_indices = [94, 5313, 7655, 7932, 10878, 10920, 11036, 14827, 16820, 17286, 17397, 17483, 18601, 19430]
     X_test_empty_indices = [1151, 1255, 3044, 4237, 4427, 4709]
     
-    npz_data = np.load("data/npz/data_64.npz")
+    npz_data = np.load("data/npz/compressed/data_64.npz")
     X_train = npz_data["X_train"]
     X_test = npz_data["X_test"]
     y_train = pd.read_csv("data/train.csv", usecols=["label"])
