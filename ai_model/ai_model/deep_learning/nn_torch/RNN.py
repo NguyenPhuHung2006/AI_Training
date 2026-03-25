@@ -9,7 +9,7 @@ class RNN(BaseModel):
 
         self.input_size = input_size
         self.mode = mode
-
+        
         self.rnn_types = {
             "lstm": nn.LSTM,
             "gru": nn.GRU,
@@ -17,7 +17,7 @@ class RNN(BaseModel):
         }
         self.rnn_class = self.rnn_types[rnn_type]
 
-        self.rnn_layers = nn.ModuleList()
+        self.rnn = None
         self.fc_layers = nn.ModuleList()
 
         # seq2seq
@@ -26,20 +26,14 @@ class RNN(BaseModel):
 
         self.embeddings = None
         self.output_size = None
-
-    # -------------------------------------------------
-    # Embedding
-    # -------------------------------------------------
+        
     def add_embedding(self, vocab_size, embed_dim, padding_idx=0):
         self.embeddings = nn.Embedding(vocab_size, embed_dim, padding_idx=padding_idx)
         self.input_size = embed_dim
         return self
 
-    # -------------------------------------------------
-    # RNN layers
-    # -------------------------------------------------
     def add_rnn(self, hidden_size, num_layers=1, dropout=0.0, bidirectional=False):
-        rnn = self.rnn_class(
+        self.rnn = self.rnn_class(
             input_size=self.input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
@@ -47,23 +41,20 @@ class RNN(BaseModel):
             batch_first=True,
             bidirectional=bidirectional
         )
-        self.rnn_layers.append(rnn)
+
         self.input_size = hidden_size * (2 if bidirectional else 1)
         return self
 
-    # -------------------------------------------------
-    # Seq2Seq
-    # -------------------------------------------------
     def add_seq2seq(self, hidden_size, num_layers=1):
         self.encoder = self.rnn_class(
-            self.input_size, 
+            self.input_size,
             hidden_size,
             num_layers=num_layers,
             batch_first=True
         )
 
         self.decoder = self.rnn_class(
-            hidden_size, 
+            hidden_size,
             hidden_size,
             num_layers=num_layers,
             batch_first=True
@@ -72,9 +63,6 @@ class RNN(BaseModel):
         self.input_size = hidden_size
         return self
 
-    # -------------------------------------------------
-    # FC layers
-    # -------------------------------------------------
     def add_fc(self, out_features, **kwargs):
         layer = nn.Linear(self.input_size, out_features)
         block = self._apply_utils(layer, **kwargs, norm_dim=out_features)
@@ -84,21 +72,21 @@ class RNN(BaseModel):
         self.output_size = out_features
         return self
 
-    # -------------------------------------------------
-    # Build (BaseModel compatible)
-    # -------------------------------------------------
     def build(self):
         self.to(self.device)
 
-        main_params = (
-            list(self.rnn_layers.parameters()) +
-            list(self.fc_layers.parameters())
-        )
+        main_params = []
+
+        if self.rnn:
+            main_params += list(self.rnn.parameters())
 
         if self.encoder:
             main_params += list(self.encoder.parameters())
+
         if self.decoder:
             main_params += list(self.decoder.parameters())
+
+        main_params += list(self.fc_layers.parameters())
 
         embed_params = list(self.embeddings.parameters()) if self.embeddings else []
 
@@ -112,16 +100,13 @@ class RNN(BaseModel):
 
         self.optimizer = torch.optim.Adam(params_to_train, weight_decay=self.weight_decay)
 
-        self.model = self  # critical for BaseModel
+        self.model = self
         return self
 
-    # -------------------------------------------------
-    # Forward
-    # -------------------------------------------------
     def forward(self, x, lengths=None, target=None, hidden=None):
         """
         x: (B, T) or (B, T, F)
-        target: used for seq2seq / teacher forcing
+        target: for seq2seq (teacher forcing)
         """
 
         # ---- Embedding ----
@@ -133,22 +118,19 @@ class RNN(BaseModel):
             enc_out, hidden = self.encoder(x)
 
             if target is not None:
-                # teacher forcing
-                if self.embeddings and target.dim() == 2:
+                if self.embeddings is not None and target.dim() == 2:
                     target = self.embeddings(target)
-                dec_out, _ = self.decoder(target, hidden)
+                x, _ = self.decoder(target, hidden)
             else:
-                dec_out, _ = self.decoder(x, hidden)
+                x, _ = self.decoder(x, hidden)
 
-            x = dec_out
-
-        # ---- NORMAL RNN STACK ----
+        # ---- STANDARD RNN ----
         else:
             if lengths is not None:
                 x = pack_padded_sequence(x, lengths.cpu(), batch_first=True, enforce_sorted=False)
 
-            for rnn in self.rnn_layers:
-                x, hidden = rnn(x, hidden) if hidden is not None else rnn(x)
+            if self.rnn is not None:
+                x, hidden = self.rnn(x, hidden) if hidden is not None else self.rnn(x)
 
             if lengths is not None:
                 x, _ = pad_packed_sequence(x, batch_first=True)
@@ -161,8 +143,7 @@ class RNN(BaseModel):
             x = x[:, -1, :]  # (B, H)
 
         elif self.mode == "one_to_many":
-            # assume input is (B, 1, F)
-            # output whole sequence
+            # keep full sequence
             pass
 
         elif self.mode == "many_to_many":
@@ -174,16 +155,13 @@ class RNN(BaseModel):
             pass
 
         # -------------------------------------------------
-        # FC
+        # FC layers
         # -------------------------------------------------
         for fc in self.fc_layers:
             x = fc(x)
 
         return x
 
-    # -------------------------------------------------
-    # Summary override
-    # -------------------------------------------------
     def summary(self):
         total_params = 0
 
@@ -192,35 +170,32 @@ class RNN(BaseModel):
 
         if self.embeddings:
             params = sum(p.numel() for p in self.embeddings.parameters())
-            total_params += params
             print(f"{'Embedding':15} | params: {params}")
+            total_params += params
+
+        if self.rnn:
+            params = sum(p.numel() for p in self.rnn.parameters())
+            print(f"{'RNN':15} | params: {params}")
+            total_params += params
 
         if self.encoder:
             params = sum(p.numel() for p in self.encoder.parameters())
-            total_params += params
             print(f"{'Encoder':15} | params: {params}")
+            total_params += params
 
         if self.decoder:
             params = sum(p.numel() for p in self.decoder.parameters())
-            total_params += params
             print(f"{'Decoder':15} | params: {params}")
-
-        for i, rnn in enumerate(self.rnn_layers):
-            params = sum(p.numel() for p in rnn.parameters())
             total_params += params
-            print(f"{f'RNN {i}':15} | params: {params}")
 
         for i, fc in enumerate(self.fc_layers):
             params = sum(p.numel() for p in fc.parameters())
-            total_params += params
             print(f"{f'FC {i}':15} | params: {params}")
+            total_params += params
 
         print("-" * 50)
         print(f"Total parameters: {total_params}\n")
-
-    # -------------------------------------------------
-    # Generate (for one_to_many / seq2seq)
-    # -------------------------------------------------
+        
     def generate(self, start_tokens, max_len=20, temperature=1.0):
         self.eval()
 
