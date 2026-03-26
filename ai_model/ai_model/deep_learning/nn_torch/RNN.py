@@ -24,6 +24,10 @@ class RNN(BaseModel):
         self.encoder = None
         self.decoder = None
 
+        self.enc_bidirectional = False
+        self.bridge_h = None
+        self.bridge_c = None
+
         self.embeddings = None
         self.output_size = None
         
@@ -45,12 +49,13 @@ class RNN(BaseModel):
         self.input_size = hidden_size * (2 if bidirectional else 1)
         return self
 
-    def add_seq2seq(self, hidden_size, num_layers=1):
+    def add_seq2seq(self, hidden_size, num_layers=1, bidirectional_encoder=True):
         self.encoder = self.rnn_class(
             self.input_size,
             hidden_size,
             num_layers=num_layers,
-            batch_first=True
+            batch_first=True,
+            bidirectional=bidirectional_encoder
         )
 
         self.decoder = self.rnn_class(
@@ -59,6 +64,18 @@ class RNN(BaseModel):
             num_layers=num_layers,
             batch_first=True
         )
+
+        self.enc_bidirectional = bidirectional_encoder
+        self.num_layers = num_layers
+        self.hidden_size = hidden_size
+
+        if bidirectional_encoder:
+            self.bridge_h = nn.Linear(hidden_size * 2, hidden_size)
+            if self.rnn_class == nn.LSTM:
+                self.bridge_c = nn.Linear(hidden_size * 2, hidden_size)
+        else:
+            self.bridge_h = None
+            self.bridge_c = None
 
         self.input_size = hidden_size
         return self
@@ -86,6 +103,12 @@ class RNN(BaseModel):
         if self.decoder:
             main_params += list(self.decoder.parameters())
 
+        if self.bridge_h:
+            main_params += list(self.bridge_h.parameters())
+
+        if self.bridge_c:
+            main_params += list(self.bridge_c.parameters())
+
         main_params += list(self.fc_layers.parameters())
 
         embed_params = list(self.embeddings.parameters()) if self.embeddings else []
@@ -104,11 +127,6 @@ class RNN(BaseModel):
         return self
 
     def forward(self, x, lengths=None, target=None, hidden=None):
-        """
-        x: (B, T) or (B, T, F)
-        target: for seq2seq (teacher forcing)
-        """
-
         # ---- Embedding ----
         if self.embeddings is not None and x.dim() == 2:
             x = self.embeddings(x)
@@ -117,6 +135,36 @@ class RNN(BaseModel):
         if self.mode == "seq2seq":
             enc_out, hidden = self.encoder(x)
 
+            if self.enc_bidirectional:
+                B = x.size(0)
+
+                # LSTM
+                if isinstance(hidden, tuple):
+                    h, c = hidden
+
+                    h = h.view(self.num_layers, 2, B, self.hidden_size)
+                    c = c.view(self.num_layers, 2, B, self.hidden_size)
+
+                    h = torch.cat([h[:, 0], h[:, 1]], dim=-1)
+                    c = torch.cat([c[:, 0], c[:, 1]], dim=-1)
+
+                    h = self.bridge_h(h)
+                    c = self.bridge_c(c)
+
+                    hidden = (h, c)
+
+                # GRU / RNN
+                else:
+                    h = hidden
+
+                    h = h.view(self.num_layers, 2, B, self.hidden_size)
+                    h = torch.cat([h[:, 0], h[:, 1]], dim=-1)
+
+                    h = self.bridge_h(h)
+
+                    hidden = h
+
+            # ---- Decoder ----
             if target is not None:
                 if self.embeddings is not None and target.dim() == 2:
                     target = self.embeddings(target)
@@ -135,28 +183,14 @@ class RNN(BaseModel):
             if lengths is not None:
                 x, _ = pad_packed_sequence(x, batch_first=True)
 
-        # -------------------------------------------------
-        # MODE HANDLING
-        # -------------------------------------------------
-
+        # ---- MODE HANDLING ----
         if self.mode == "many_to_one":
-            x = x[:, -1, :]  # (B, H)
+            x = x[:, -1, :]
 
-        elif self.mode == "one_to_many":
-            # keep full sequence
+        elif self.mode in ["one_to_many", "many_to_many", "seq2seq"]:
             pass
 
-        elif self.mode == "many_to_many":
-            # keep full sequence
-            pass
-
-        elif self.mode == "seq2seq":
-            # already handled
-            pass
-
-        # -------------------------------------------------
-        # FC layers
-        # -------------------------------------------------
+        # ---- FC ----
         for fc in self.fc_layers:
             x = fc(x)
 
@@ -188,6 +222,16 @@ class RNN(BaseModel):
             print(f"{'Decoder':15} | params: {params}")
             total_params += params
 
+        if self.bridge_h:
+            params = sum(p.numel() for p in self.bridge_h.parameters())
+            print(f"{'Bridge_h':15} | params: {params}")
+            total_params += params
+
+        if self.bridge_c:
+            params = sum(p.numel() for p in self.bridge_c.parameters())
+            print(f"{'Bridge_c':15} | params: {params}")
+            total_params += params
+
         for i, fc in enumerate(self.fc_layers):
             params = sum(p.numel() for p in fc.parameters())
             print(f"{f'FC {i}':15} | params: {params}")
@@ -195,26 +239,3 @@ class RNN(BaseModel):
 
         print("-" * 50)
         print(f"Total parameters: {total_params}\n")
-        
-    def generate(self, start_tokens, max_len=20, temperature=1.0):
-        self.eval()
-
-        if not torch.is_tensor(start_tokens):
-            start_tokens = torch.tensor(start_tokens, device=self.device)
-
-        x = start_tokens.unsqueeze(0)
-        hidden = None
-
-        outputs = start_tokens.tolist()
-
-        for _ in range(max_len):
-            logits = self(x)
-            logits = logits[:, -1, :] / temperature
-
-            probs = torch.softmax(logits, dim=-1)
-            token = torch.multinomial(probs, 1)
-
-            outputs.append(token.item())
-            x = torch.cat([x, token], dim=1)
-
-        return outputs
