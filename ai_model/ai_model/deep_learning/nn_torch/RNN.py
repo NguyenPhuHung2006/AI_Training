@@ -3,13 +3,14 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from .BaseModel import BaseModel
 
+
 class RNN(BaseModel):
     def __init__(self, input_size=None, rnn_type="lstm", mode="many_to_one", **kwargs):
         super().__init__(**kwargs)
 
         self.input_size = input_size
         self.mode = mode
-        
+
         self.rnn_types = {
             "lstm": nn.LSTM,
             "gru": nn.GRU,
@@ -30,7 +31,15 @@ class RNN(BaseModel):
 
         self.embeddings = None
         self.output_size = None
-        
+
+        # special tokens
+        self.sos_token = 1
+        self.eos_token = 2
+
+    # ----------------------------
+    # BUILDING BLOCKS
+    # ----------------------------
+
     def add_embedding(self, vocab_size, embed_dim, padding_idx=0):
         self.embeddings = nn.Embedding(vocab_size, embed_dim, padding_idx=padding_idx)
         self.input_size = embed_dim
@@ -73,9 +82,6 @@ class RNN(BaseModel):
             self.bridge_h = nn.Linear(hidden_size * 2, hidden_size)
             if self.rnn_class == nn.LSTM:
                 self.bridge_c = nn.Linear(hidden_size * 2, hidden_size)
-        else:
-            self.bridge_h = None
-            self.bridge_c = None
 
         self.input_size = hidden_size
         return self
@@ -94,20 +100,9 @@ class RNN(BaseModel):
 
         main_params = []
 
-        if self.rnn:
-            main_params += list(self.rnn.parameters())
-
-        if self.encoder:
-            main_params += list(self.encoder.parameters())
-
-        if self.decoder:
-            main_params += list(self.decoder.parameters())
-
-        if self.bridge_h:
-            main_params += list(self.bridge_h.parameters())
-
-        if self.bridge_c:
-            main_params += list(self.bridge_c.parameters())
+        for module in [self.rnn, self.encoder, self.decoder, self.bridge_h, self.bridge_c]:
+            if module:
+                main_params += list(module.parameters())
 
         main_params += list(self.fc_layers.parameters())
 
@@ -126,22 +121,31 @@ class RNN(BaseModel):
         self.model = self
         return self
 
-    def forward(self, x, lengths=None, target=None, hidden=None):
+    # ----------------------------
+    # FORWARD
+    # ----------------------------
+
+    def forward(self, x, lengths=None, target=None, hidden=None, teacher_forcing_ratio=1.0):
+        x = x.to(self.device)
+        if target is not None:
+            target = target.to(self.device)
+
         # ---- Embedding ----
         if self.embeddings is not None and x.dim() == 2:
             x = self.embeddings(x)
 
-        # ---- SEQ2SEQ ----
+        # =========================
+        # SEQ2SEQ
+        # =========================
         if self.mode == "seq2seq":
             enc_out, hidden = self.encoder(x)
 
+            # ---- Handle bidirectional ----
             if self.enc_bidirectional:
                 B = x.size(0)
 
-                # LSTM
-                if isinstance(hidden, tuple):
+                if isinstance(hidden, tuple):  # LSTM
                     h, c = hidden
-
                     h = h.view(self.num_layers, 2, B, self.hidden_size)
                     c = c.view(self.num_layers, 2, B, self.hidden_size)
 
@@ -149,93 +153,150 @@ class RNN(BaseModel):
                     c = torch.cat([c[:, 0], c[:, 1]], dim=-1)
 
                     h = self.bridge_h(h)
-                    c = self.bridge_c(c)
+                    c = self.bridge_c(c) if self.bridge_c else c
 
                     hidden = (h, c)
-
-                # GRU / RNN
                 else:
-                    h = hidden
-
-                    h = h.view(self.num_layers, 2, B, self.hidden_size)
+                    h = hidden.view(self.num_layers, 2, B, self.hidden_size)
                     h = torch.cat([h[:, 0], h[:, 1]], dim=-1)
-
                     h = self.bridge_h(h)
-
                     hidden = h
 
-            # ---- Decoder ----
-            if target is not None:
-                if self.embeddings is not None and target.dim() == 2:
-                    target = self.embeddings(target)
-                x, _ = self.decoder(target, hidden)
-            else:
-                x, _ = self.decoder(x, hidden)
+            # ---- Decoder loop ----
+            B = x.size(0)
+            T = target.size(1) if target is not None else x.size(1)
 
-        # ---- STANDARD RNN ----
+            input_t = torch.full((B, 1), self.sos_token, device=self.device)
+
+            if self.embeddings:
+                input_t = self.embeddings(input_t)
+            else:
+                input_t = input_t.float().unsqueeze(-1)
+
+            outputs = []
+
+            for t in range(T):
+                out, hidden = self.decoder(input_t, hidden)
+
+                logits = out
+                for fc in self.fc_layers:
+                    logits = fc(logits)
+
+                outputs.append(logits)
+
+                # ---- Teacher forcing ----
+                if target is not None and torch.rand(1).item() < teacher_forcing_ratio:
+                    next_input = target[:, t].unsqueeze(1)
+
+                    if self.embeddings:
+                        next_input = self.embeddings(next_input)
+                    else:
+                        next_input = next_input.float().unsqueeze(-1)
+
+                    input_t = next_input
+                else:
+                    next_token = torch.argmax(logits, dim=-1)
+
+                    if self.embeddings:
+                        input_t = self.embeddings(next_token)
+                    else:
+                        input_t = next_token.float().unsqueeze(-1)
+
+            x = torch.cat(outputs, dim=1)
+
+        # =========================
+        # STANDARD RNN
+        # =========================
         else:
             if lengths is not None:
                 x = pack_padded_sequence(x, lengths.cpu(), batch_first=True, enforce_sorted=False)
 
-            if self.rnn is not None:
+            if self.rnn:
                 x, hidden = self.rnn(x, hidden) if hidden is not None else self.rnn(x)
 
             if lengths is not None:
                 x, _ = pad_packed_sequence(x, batch_first=True)
 
-        # ---- MODE HANDLING ----
+        # ---- Mode handling ----
         if self.mode == "many_to_one":
             x = x[:, -1, :]
 
-        elif self.mode in ["one_to_many", "many_to_many", "seq2seq"]:
-            pass
-
         # ---- FC ----
-        for fc in self.fc_layers:
-            x = fc(x)
+        if self.mode != "seq2seq":
+            for fc in self.fc_layers:
+                x = fc(x)
 
         return x
 
-    def summary(self):
-        total_params = 0
+    # ----------------------------
+    # GENERATE
+    # ----------------------------
 
-        print("\nRNN Model Summary")
-        print("-" * 50)
+    def generate(self, start_tokens, max_len=20, temperature=1.0):
+        self.eval()
+
+        if not torch.is_tensor(start_tokens):
+            start_tokens = torch.tensor(start_tokens, device=self.device)
+
+        x = start_tokens.unsqueeze(0).to(self.device)
 
         if self.embeddings:
-            params = sum(p.numel() for p in self.embeddings.parameters())
-            print(f"{'Embedding':15} | params: {params}")
-            total_params += params
+            x = self.embeddings(x)
 
-        if self.rnn:
-            params = sum(p.numel() for p in self.rnn.parameters())
-            print(f"{'RNN':15} | params: {params}")
-            total_params += params
+        enc_out, hidden = self.encoder(x)
 
-        if self.encoder:
-            params = sum(p.numel() for p in self.encoder.parameters())
-            print(f"{'Encoder':15} | params: {params}")
-            total_params += params
+        # ---- Bidirectional fix ----
+        if self.enc_bidirectional:
+            B = x.size(0)
 
-        if self.decoder:
-            params = sum(p.numel() for p in self.decoder.parameters())
-            print(f"{'Decoder':15} | params: {params}")
-            total_params += params
+            if isinstance(hidden, tuple):
+                h, c = hidden
+                h = h.view(self.num_layers, 2, B, self.hidden_size)
+                c = c.view(self.num_layers, 2, B, self.hidden_size)
 
-        if self.bridge_h:
-            params = sum(p.numel() for p in self.bridge_h.parameters())
-            print(f"{'Bridge_h':15} | params: {params}")
-            total_params += params
+                h = torch.cat([h[:, 0], h[:, 1]], dim=-1)
+                c = torch.cat([c[:, 0], c[:, 1]], dim=-1)
 
-        if self.bridge_c:
-            params = sum(p.numel() for p in self.bridge_c.parameters())
-            print(f"{'Bridge_c':15} | params: {params}")
-            total_params += params
+                h = self.bridge_h(h)
+                c = self.bridge_c(c) if self.bridge_c else c
 
-        for i, fc in enumerate(self.fc_layers):
-            params = sum(p.numel() for p in fc.parameters())
-            print(f"{f'FC {i}':15} | params: {params}")
-            total_params += params
+                hidden = (h, c)
+            else:
+                h = hidden.view(self.num_layers, 2, B, self.hidden_size)
+                h = torch.cat([h[:, 0], h[:, 1]], dim=-1)
+                h = self.bridge_h(h)
+                hidden = h
 
-        print("-" * 50)
-        print(f"Total parameters: {total_params}\n")
+        input_t = torch.tensor([[self.sos_token]], device=self.device)
+
+        if self.embeddings:
+            input_t = self.embeddings(input_t)
+        else:
+            input_t = input_t.float().unsqueeze(-1)
+
+        outputs = []
+
+        for _ in range(max_len):
+            out, hidden = self.decoder(input_t, hidden)
+
+            logits = out
+            for fc in self.fc_layers:
+                logits = fc(logits)
+
+            logits = logits[:, -1, :] / temperature
+            probs = torch.softmax(logits, dim=-1)
+
+            token = torch.multinomial(probs, 1)
+            token_id = token.item()
+
+            outputs.append(token_id)
+
+            if token_id == self.eos_token:
+                break
+
+            if self.embeddings:
+                input_t = self.embeddings(token)
+            else:
+                input_t = token.float().unsqueeze(-1)
+
+        return outputs
