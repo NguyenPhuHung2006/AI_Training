@@ -1,45 +1,59 @@
 import numpy as np
-import matplotlib.pyplot as plt
 
 # -----------------------
-# 1. Load your dataset
+# 1. Load NORMALIZED data
 # -----------------------
 npz_data = np.load("data/npz/compressed/data_64.npz")
-X_train = npz_data["X_train"]  # shape: (N, H, W, C) or (N, H, W)
-print("Original dataset shape:", X_train.shape)
+X_train_norm = npz_data["X_train"]  # already in [0,1]
+
+print("Normalized min/max:", X_train_norm.min(), X_train_norm.max())
 
 # -----------------------
-# 2. Define augmentation functions
+# 2. Convert back to RAW for augmentation
+# -----------------------
+X_train_raw = (X_train_norm * 255).clip(0, 255).astype(np.uint8)
+
+print("Raw min/max:", X_train_raw.min(), X_train_raw.max())
+
+# -----------------------
+# 3. Augmentation functions (WORK ON RAW)
 # -----------------------
 def horizontal_flip(images):
-    return np.flip(images, axis=2)  # flip width axis
+    return np.flip(images, axis=2)
 
 def vertical_flip(images):
-    return np.flip(images, axis=1)  # flip height axis
+    return np.flip(images, axis=1)
 
 def rotate_90(images, k=1):
-    # Rotate each image 90*k degrees counterclockwise
     return np.array([np.rot90(img, k=k, axes=(0,1)) for img in images])
 
 def add_noise(images, scale=0.05):
-    # Add random Gaussian noise
-    noisy = images + np.random.randn(*images.shape) * scale
-    return np.clip(noisy, 0, 1).astype(images.dtype)
+    noisy = images.astype(np.float32) + np.random.randn(*images.shape) * scale * 255
+    return np.clip(noisy, 0, 255).astype(np.uint8)
 
 # -----------------------
-# 3. Apply augmentations
+# 4. Apply augmentations (RAW ONLY)
 # -----------------------
-X_hflip = horizontal_flip(X_train)
-X_vflip = vertical_flip(X_train)
-X_rot90 = rotate_90(X_train)
-X_noise = add_noise(X_train, scale=0.05)
+X_hflip = horizontal_flip(X_train_raw)
+X_vflip = vertical_flip(X_train_raw)
+X_rot90 = rotate_90(X_train_raw)
+X_noise = add_noise(X_train_raw, scale=0.05)
 
-# Combine all augmented data with original
-X_augmented = np.concatenate([X_train, X_hflip, X_vflip, X_rot90, X_noise], axis=0)
-print("Combined dataset shape:", X_augmented.shape)
+# Combine ONLY augmented (NOT normalized)
+X_augmented = np.concatenate(
+    [X_train_raw, X_hflip, X_vflip, X_rot90, X_noise],
+    axis=0
+).astype(np.uint8)
+
+print("Augmented shape:", X_augmented.shape)
+print("Augmented min/max:", X_augmented.min(), X_augmented.max())
 
 # -----------------------
-# 4. Save to a new file
+# 5. Save
 # -----------------------
-np.save("data/npz/compressed/data_64_augmented.npy", X_augmented)
-print("Saved augmented dataset to data_64_augmented.npy")
+np.savez_compressed(
+    "data/npz/compressed/data_64_augmented.npz",
+    X_train=X_augmented
+)
+
+print("Saved successfully")
