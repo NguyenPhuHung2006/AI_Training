@@ -23,8 +23,8 @@ def rotate_90(images, k=1):
 
 def add_noise(images, scale=0.05):
     # Add random Gaussian noise
-    noisy = images + np.random.randn(*images.shape) * scale * 255
-    return np.clip(noisy, 0, 255).astype(images.dtype)
+    noisy = images + np.random.randn(*images.shape) * scale
+    return np.clip(noisy, 0, 1).astype(images.dtype)
 
 # -----------------------
 # 3. Apply augmentations
