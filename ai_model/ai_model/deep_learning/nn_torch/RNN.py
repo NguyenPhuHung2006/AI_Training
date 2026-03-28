@@ -88,32 +88,6 @@ class RNN(BaseModel):
         self.output_size = out_features
         return self
 
-    def build(self):
-        self.to(self.device)
-
-        main_params = []
-
-        for module in [self.rnn, self.encoder, self.decoder, self.bridge_h, self.bridge_c]:
-            if module:
-                main_params += list(module.parameters())
-
-        main_params += list(self.fc_layers.parameters())
-
-        embed_params = list(self.embeddings.parameters()) if self.embeddings else []
-
-        if embed_params:
-            params_to_train = [
-                {'params': main_params, 'lr': self.lr},
-                {'params': embed_params, 'lr': self.lr * 10}
-            ]
-        else:
-            params_to_train = [{'params': main_params, 'lr': self.lr}]
-
-        self.optimizer = torch.optim.Adam(params_to_train, weight_decay=self.weight_decay)
-
-        self.model = self
-        return self
-
     def forward(self, x, lengths=None, target=None, hidden=None, teacher_forcing_ratio=1.0):
         x = x.to(self.device)
         if target is not None:
