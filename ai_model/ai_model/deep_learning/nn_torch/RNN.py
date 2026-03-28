@@ -120,7 +120,7 @@ class RNN(BaseModel):
             target = target.to(self.device)
 
         if self.embeddings is not None and x.dim() == 2:
-            x = self.embeddings(x)
+            x = self.embeddings(x.long())
             
         if self.mode == "seq2seq":
             enc_out, hidden = self.encoder(x)
@@ -203,7 +203,10 @@ class RNN(BaseModel):
 
         # ---- Mode handling ----
         if self.mode == "many_to_one":
-            x = x[:, -1, :]
+            if lengths is None:
+                x = x[:, -1]
+            else:
+                x = x[torch.arange(x.size(0)), lengths - 1]
 
         # ---- FC ----
         if self.mode != "seq2seq":
