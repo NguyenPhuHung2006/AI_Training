@@ -185,10 +185,18 @@ class RNN(BaseModel):
 
         # ---- Mode handling ----
         if self.mode == "many_to_one":
-            if lengths is None:
-                x = x[:, -1]
+            if isinstance(hidden, tuple):
+                h = hidden[0]
             else:
-                x = x[torch.arange(x.size(0)), lengths - 1]
+                h = hidden
+
+            if self.rnn.bidirectional:
+                h = h.view(self.rnn.num_layers, 2, x.size(0), self.rnn.hidden_size)
+                h = torch.cat([h[-1, 0], h[-1, 1]], dim=1)
+            else:
+                h = h[-1]
+
+            x = h
 
         # ---- FC ----
         if self.mode != "seq2seq":
