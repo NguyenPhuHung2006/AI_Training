@@ -3,7 +3,6 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from .BaseModel import BaseModel
 
-
 class RNN(BaseModel):
     def __init__(self, input_size=None, rnn_type="lstm", mode="many_to_one", **kwargs):
         super().__init__(**kwargs)
@@ -21,7 +20,6 @@ class RNN(BaseModel):
         self.rnn = None
         self.fc_layers = nn.ModuleList()
 
-        # seq2seq
         self.encoder = None
         self.decoder = None
 
@@ -32,13 +30,8 @@ class RNN(BaseModel):
         self.embeddings = None
         self.output_size = None
 
-        # special tokens
         self.sos_token = 1
         self.eos_token = 2
-
-    # ----------------------------
-    # BUILDING BLOCKS
-    # ----------------------------
 
     def add_embedding(self, vocab_size, embed_dim, padding_idx=0):
         self.embeddings = nn.Embedding(vocab_size, embed_dim, padding_idx=padding_idx)
@@ -121,30 +114,20 @@ class RNN(BaseModel):
         self.model = self
         return self
 
-    # ----------------------------
-    # FORWARD
-    # ----------------------------
-
     def forward(self, x, lengths=None, target=None, hidden=None, teacher_forcing_ratio=1.0):
         x = x.to(self.device)
         if target is not None:
             target = target.to(self.device)
 
-        # ---- Embedding ----
         if self.embeddings is not None and x.dim() == 2:
             x = self.embeddings(x)
-
-        # =========================
-        # SEQ2SEQ
-        # =========================
+            
         if self.mode == "seq2seq":
             enc_out, hidden = self.encoder(x)
+            B = x.size(0)
 
-            # ---- Handle bidirectional ----
             if self.enc_bidirectional:
-                B = x.size(0)
-
-                if isinstance(hidden, tuple):  # LSTM
+                if isinstance(hidden, tuple):
                     h, c = hidden
                     h = h.view(self.num_layers, 2, B, self.hidden_size)
                     c = c.view(self.num_layers, 2, B, self.hidden_size)
@@ -162,13 +145,11 @@ class RNN(BaseModel):
                     h = self.bridge_h(h)
                     hidden = h
 
-            # ---- Decoder loop ----
-            B = x.size(0)
             T = target.size(1) if target is not None else x.size(1)
 
             input_t = torch.full((B, 1), self.sos_token, device=self.device)
 
-            if self.embeddings:
+            if self.embeddings is not None:
                 input_t = self.embeddings(input_t)
             else:
                 input_t = input_t.float().unsqueeze(-1)
@@ -188,7 +169,7 @@ class RNN(BaseModel):
                 if target is not None and torch.rand(1).item() < teacher_forcing_ratio:
                     next_input = target[:, t].unsqueeze(1)
 
-                    if self.embeddings:
+                    if self.embeddings is not None:
                         next_input = self.embeddings(next_input)
                     else:
                         next_input = next_input.float().unsqueeze(-1)
@@ -197,7 +178,7 @@ class RNN(BaseModel):
                 else:
                     next_token = torch.argmax(logits, dim=-1)
 
-                    if self.embeddings:
+                    if self.embeddings is not None:
                         input_t = self.embeddings(next_token)
                     else:
                         input_t = next_token.float().unsqueeze(-1)
@@ -212,7 +193,10 @@ class RNN(BaseModel):
                 x = pack_padded_sequence(x, lengths.cpu(), batch_first=True, enforce_sorted=False)
 
             if self.rnn:
-                x, hidden = self.rnn(x, hidden) if hidden is not None else self.rnn(x)
+                if hidden is not None:
+                    x, hidden = self.rnn(x, hidden)
+                else:
+                    x, hidden = self.rnn(x)
 
             if lengths is not None:
                 x, _ = pad_packed_sequence(x, batch_first=True)
@@ -240,7 +224,7 @@ class RNN(BaseModel):
 
         x = start_tokens.unsqueeze(0).to(self.device)
 
-        if self.embeddings:
+        if self.embeddings is not None:
             x = self.embeddings(x)
 
         enc_out, hidden = self.encoder(x)
@@ -269,7 +253,7 @@ class RNN(BaseModel):
 
         input_t = torch.tensor([[self.sos_token]], device=self.device)
 
-        if self.embeddings:
+        if self.embeddings is not None:
             input_t = self.embeddings(input_t)
         else:
             input_t = input_t.float().unsqueeze(-1)
@@ -294,7 +278,7 @@ class RNN(BaseModel):
             if token_id == self.eos_token:
                 break
 
-            if self.embeddings:
+            if self.embeddings is not None:
                 input_t = self.embeddings(token)
             else:
                 input_t = token.float().unsqueeze(-1)
