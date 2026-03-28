@@ -30,11 +30,13 @@ class RNN(BaseModel):
         self.embeddings = None
         self.output_size = None
 
-        self.sos_token = 1
-        self.eos_token = 2
+        self.sos_token = None
+        self.eos_token = None
+        self.pad_token = None
 
-    def add_embedding(self, vocab_size, embed_dim, padding_idx=0):
-        self.embeddings = nn.Embedding(vocab_size, embed_dim, padding_idx=padding_idx)
+    def add_embedding(self, vocab_size, embed_dim):
+        pad_id = self.pad_token if self.pad_token is not None else 0
+        self.embeddings = nn.Embedding(vocab_size, embed_dim, padding_idx=pad_id)
         self.input_size = embed_dim
         return self
 
@@ -88,8 +90,9 @@ class RNN(BaseModel):
         self.output_size = out_features
         return self
 
-    def forward(self, x, lengths=None, target=None, hidden=None, teacher_forcing_ratio=1.0):
+    def forward(self, x, target=None, hidden=None, teacher_forcing_ratio=1.0):
         x = x.to(self.device)
+        lengths = (x != self.pad_token).sum(dim=1)
         if target is not None:
             target = target.to(self.device)
 
@@ -97,6 +100,11 @@ class RNN(BaseModel):
             x = self.embeddings(x.long())
             
         if self.mode == "seq2seq":
+            if self.eos_token is None:
+                raise ValueError("eos token is not defined")
+            if self.sos_token is None:
+                raise ValueError("sos token is not defined")
+            
             enc_out, hidden = self.encoder(x)
             B = x.size(0)
 
@@ -194,6 +202,11 @@ class RNN(BaseModel):
     # ----------------------------
 
     def generate(self, start_tokens, max_len=20, temperature=1.0):
+        if self.eos_token is None:
+            raise ValueError("eos token is not defined")
+        if self.sos_token is None:
+            raise ValueError("sos token is not defined")
+        
         self.eval()
 
         if not torch.is_tensor(start_tokens):

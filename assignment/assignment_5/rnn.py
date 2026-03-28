@@ -1,7 +1,6 @@
 import pandas as pd
 import torch
 import os
-from collections import Counter
 from torch.nn.utils.rnn import pad_sequence
 from ai_model.deep_learning.nn_torch import RNN
 from ai_model.deep_learning.nn_torch.callback import EarlyStopping, ModelCheckpoint
@@ -37,14 +36,15 @@ def tokenizing(df):
     
     return tokenizer
     
-def get_tokenize(df, tokenizer, MAX_T=1024, has_label=True):
+def get_tokenize(df, tokenizer, MAX_T=1024, has_label=True, pad_id=None):
     encoded_codes = []
     for text in df["code"]:
         token_ids = tokenizer.encode(text).ids
         truncated_ids = token_ids[:MAX_T]
         encoded_codes.append(torch.tensor(truncated_ids, dtype=torch.long))
 
-    padded_sequences = pad_sequence(encoded_codes, batch_first=True, padding_value=0)
+    pad_id = pad_id if pad_id is not None else 0
+    padded_sequences = pad_sequence(encoded_codes, batch_first=True, padding_value=pad_id)
     
     labels_tensor = None
     if has_label:
@@ -57,14 +57,26 @@ def main():
     df_test = preprocessing_data("data/test.csv", has_label=False)
     
     tokenizer = tokenizing(df_train)
+    tokenizer.add_special_tokens([
+        "<pad>",
+        "<sos>",
+        "<eos>"
+    ])
+    pad_id = tokenizer.token_to_id("<pad>")
+    sos_id = tokenizer.token_to_id("<sos>")
+    eos_id = tokenizer.token_to_id("<eos>")
     
-    X_train, y_train = get_tokenize(df_train, tokenizer, has_label=True)
-    X_test, _ = get_tokenize(df_test, tokenizer, has_label=False)
+    MAX_T = 200
+    X_train, y_train = get_tokenize(df_train, tokenizer, has_label=True, MAX_T=MAX_T, pad_id=pad_id)
+    X_test, _ = get_tokenize(df_test, tokenizer, has_label=False, MAX_T=MAX_T, pad_id=pad_id)
     vocab_size = tokenizer.get_vocab_size()
 
-    model = RNN(mode="many_to_one", cost="bce")
+    model = RNN(mode="many_to_one", cost="bce", lr=5e-4)
+    model.pad_token = pad_id
+    model.sos_token = sos_id
+    model.eos_token = eos_id
     model.add_embedding(vocab_size=vocab_size, embed_dim=128)
-    model.add_rnn(hidden_size=128, bidirectional=True)
+    model.add_rnn(hidden_size=256, num_layers=2, dropout=0.3, bidirectional=True)
     model.add_fc(1)
     model.build()
     
@@ -78,7 +90,7 @@ def main():
     # reload the model
     # model.load(f"{nn_data_path}/rnn_{i - 1}.pth")
 
-    callbacks = [EarlyStopping(patience=3), ModelCheckpoint(f"{nn_data_path}/rnn_{i}.pth")]
+    callbacks = [EarlyStopping(patience=5), ModelCheckpoint(f"{nn_data_path}/rnn_{i}.pth")]
     
     print(f"Starting training with Vocab Size: {vocab_size} and Max Sequence: {X_train.shape[1]}")
     
