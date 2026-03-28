@@ -1,60 +1,69 @@
 import pandas as pd
 import torch
-import json
-import re
 import os
 from collections import Counter
 from torch.nn.utils.rnn import pad_sequence
 from ai_model.deep_learning.nn_torch import RNN
 from ai_model.deep_learning.nn_torch.callback import EarlyStopping, ModelCheckpoint
+from tokenizers import ByteLevelBPETokenizer
+import numpy as np
 
-def tokenize(code):
-    if pd.isna(code):
-        code = ""
-    return re.findall(r"\w+|[^\s\w]", str(code))
+def preprocessing_data(file_path, has_label=True):
+    target_cols = ["ID", "code", "Label"] if has_label else ["ID", "code"]
+    
+    df = pd.read_csv(file_path, usecols=target_cols, dtype={"code": str}, low_memory=False)
+    
+    numeric_cols = ["ID", "Label"] if has_label else ["ID"]
+    
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
 
-def encode(tokens, vocab):
-    return [vocab.get(t, vocab["<unk>"]) for t in tokens]
+    df["code"] = df["code"].astype(str).replace(['nan', 'None', ''], pd.NA)
+    df = df.dropna(subset=target_cols)
 
-def save_vocab(vocab, path):
-    with open(path, "w") as f:
-        json.dump(vocab, f, indent=4, ensure_ascii=False)
+    if has_label:
+        df["Label"] = df["Label"].astype(int)
+    
+    return df
+        
+def tokenizing(df):
+    with open("temp_code.txt", "w", encoding="utf-8") as f:
+        for code_snippet in df["code"]:
+            f.write(code_snippet + "\n")
 
-def load_vocab(path):
-    with open(path, "r") as f:
-        return json.load(f)
+    tokenizer = ByteLevelBPETokenizer()
+    tokenizer.train(files=["temp_code.txt"], vocab_size=5000, min_frequency=2)
+    os.remove("temp_code.txt")
+    
+    return tokenizer
+    
+def get_tokenize(df, tokenizer, MAX_T=1024, has_label=True):
+    encoded_codes = []
+    for text in df["code"]:
+        token_ids = tokenizer.encode(text).ids
+        truncated_ids = token_ids[:MAX_T]
+        encoded_codes.append(torch.tensor(truncated_ids, dtype=torch.long))
+
+    padded_sequences = pad_sequence(encoded_codes, batch_first=True, padding_value=0)
+    
+    labels_tensor = None
+    if has_label:
+        labels_tensor = torch.tensor(df["Label"].tolist(), dtype=torch.float).unsqueeze(1)
+    
+    return padded_sequences, labels_tensor
 
 def main():
-    df = pd.read_csv(
-        "data/train.csv",
-        usecols=["code", "Label"],
-        dtype={"code": str},
-        low_memory=False
-    )
-    df["Label"] = pd.to_numeric(df["Label"], errors='coerce')
-    df = df.dropna(subset=["Label", "code"])
-    df["Label"] = df["Label"].astype(int)
-
-    codes = df["code"].tolist()
-    labels = df["Label"].tolist()
-
-    tokenized_codes = [tokenize(c) for c in codes]
-
-    counter = Counter()
-    for tokens in tokenized_codes:
-        counter.update(tokens)
-
-    vocab = {"<pad>": 0, "<unk>": 1}
-    for word in counter:
-        vocab[word] = len(vocab)
-
-    encoded_codes = [torch.tensor(encode(tokens, vocab), dtype=torch.long) for tokens in tokenized_codes]
-
-    padded_sequences = pad_sequence(encoded_codes, batch_first=True, padding_value=vocab["<pad>"])
-    labels_tensor = torch.tensor(labels, dtype=torch.float).unsqueeze(1)
+    df_train = preprocessing_data("data/train.csv")
+    df_test = preprocessing_data("data/test.csv", has_label=False)
+    
+    tokenizer = tokenizing(df_train)
+    
+    X_train, y_train = get_tokenize(df_train, tokenizer, has_label=True)
+    X_test, _ = get_tokenize(df_test, tokenizer, has_label=False)
+    vocab_size = tokenizer.get_vocab_size()
 
     model = RNN(mode="many_to_one", cost="bce")
-    model.add_embedding(vocab_size=len(vocab), embed_dim=128)
+    model.add_embedding(vocab_size=vocab_size, embed_dim=128)
     model.add_rnn(hidden_size=128, bidirectional=True)
     model.add_fc(1)
     model.build()
@@ -70,13 +79,31 @@ def main():
     # model.load(f"{nn_data_path}/rnn_{i - 1}.pth")
 
     callbacks = [EarlyStopping(patience=3), ModelCheckpoint(f"{nn_data_path}/rnn_{i}.pth")]
+    
+    print(f"Starting training with Vocab Size: {vocab_size} and Max Sequence: {X_train.shape[1]}")
+    
     model.fit(
-        padded_sequences, 
-        labels_tensor, 
-        epochs=10, 
+        X_train, 
+        y_train, 
+        epochs=100, 
         batch_size=32, 
         callbacks=callbacks
     )
+    
+    y_pred = model.predict(X_test)
+    y_pred = (y_pred > 0.5).astype(int)
+    y_pred = y_pred.flatten()
+    
+    df = pd.DataFrame({
+        "ID": np.arange(0, len(y_pred)),
+        "Label": y_pred
+    })
+    
+    output_path = "outputs/nn"
+    os.makedirs(output_path, exist_ok=True)
+
+    df.to_csv(f"{output_path}/rnn.csv", index=False)
+    
 
 if __name__ == "__main__":
     main()
