@@ -50,7 +50,6 @@ class BaseModel(nn.Module):
         self.lr = lr
         self.weight_decay = weight_decay
         self.layers = nn.ModuleList()
-        self.model = None
         self.optimizer = None
         self.scheduler = None
         self.stop_training = False
@@ -89,12 +88,14 @@ class BaseModel(nn.Module):
         self.scheduler = self.configs["scheduler"][name](self.optimizer, **kwargs)
         return self
 
-    def build(self):
-        self.model = nn.Sequential(*self.layers).to(self.device)
-        
-        main_params = list(self.model.parameters())
-        embed_params = list(self.embeddings.parameters()) if hasattr(self, 'embeddings') else []
-        
+    def build(self):        
+        self.to(self.device)
+
+        embed_params = list(self.embeddings.parameters()) if hasattr(self, 'embeddings') and self.embeddings else []
+        embed_ids = set(map(id, embed_params))
+
+        main_params = [p for p in self.parameters() if id(p) not in embed_ids]
+
         if embed_params:
             params_to_train = [
                 {'params': main_params, 'lr': self.lr},
@@ -132,7 +133,7 @@ class BaseModel(nn.Module):
         return correct, total
 
     def _evaluate(self, X, y):
-        self.model.eval()
+        self.eval()
 
         with torch.no_grad():
             outputs = self(X)
@@ -174,7 +175,7 @@ class BaseModel(nn.Module):
             if self.stop_training: 
                 break
             
-            self.model.train()
+            self.train()
             
             total_loss = 0
             train_correct = 0
@@ -236,10 +237,10 @@ class BaseModel(nn.Module):
             tqdm.write(msg)
 
     def predict(self, X):
-        if self.model is None:
+        if self.optimizer is None:
             raise RuntimeError("Model not built. Call build() first.")
         
-        self.model.eval()
+        self.eval()
         X = self._to_tensor(X)
         
         with torch.no_grad():
@@ -248,47 +249,24 @@ class BaseModel(nn.Module):
         return outputs.cpu().numpy()
     
     def save(self, path):
-        embeddings_state = None
-        if hasattr(self, 'embeddings'):
-            embeddings_state = self.embeddings.state_dict()
-            
-        torch.save({
-            "model_state": self.model.state_dict(),
-            "embeddings_state": embeddings_state,
-            "optimizer_state": self.optimizer.state_dict(),
+        save_dict = {
+            "model_state": self.state_dict(),
+            "optimizer_state": self.optimizer.state_dict() if self.optimizer else None,
             "history": self.history
-        }, path)
+        }
+        
+        if self.scheduler:
+            save_dict["scheduler_state"] = self.scheduler.state_dict()
+            
+        torch.save(save_dict, path)
 
     def load(self, path):
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint["model_state"])
-        
-        if "embeddings_state" in checkpoint and checkpoint["embeddings_state"] is not None:
-            if hasattr(self, 'embeddings'):
-                self.embeddings.load_state_dict(checkpoint["embeddings_state"])
-            else:
-                print("Warning: Checkpoint has embeddings, but current model does not.")
+        self.load_state_dict(checkpoint["model_state"])
         
         if "optimizer_state" in checkpoint and self.optimizer:
             self.optimizer.load_state_dict(checkpoint["optimizer_state"])
         if "history" in checkpoint:
             self.history = checkpoint["history"]
             
-        self.model.eval()
-        
-    def summary(self):
-
-        total_params = 0
-
-        print("\nModel Summary")
-        print("-" * 40)
-
-        for layer in self.model:
-
-            params = sum(p.numel() for p in layer.parameters())
-            total_params += params
-
-            print(f"{layer.__class__.__name__:15} | params: {params}")
-
-        print("-" * 40)
-        print(f"Total parameters: {total_params}\n")
+        self.eval()

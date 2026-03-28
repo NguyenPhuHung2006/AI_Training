@@ -44,4 +44,8 @@ class MLP(BaseModel):
             raise ValueError("No features to pass to model!")
 
         x_combined = torch.cat(features, dim=1) if len(features) > 1 else features[0]
-        return self.model(x_combined)
+        out = x_combined
+        for layer in self.layers:
+            out = layer(out)
+        
+        return out

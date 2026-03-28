@@ -5,9 +5,8 @@ class CNN(BaseModel):
     def __init__(self, in_channels, input_size=None, **kwargs):
         super().__init__(**kwargs)
         self.current_channels = in_channels
-        self.current_size = input_size  # (H, W)
+        self.current_size = input_size
         self.flatten_dim = None
-        self.layers = nn.ModuleList()
         self.pool_types = {
             "max": nn.MaxPool2d,
             "avg": nn.AvgPool2d
@@ -15,8 +14,8 @@ class CNN(BaseModel):
 
     def add_filter(self, out_channels, kernel_size=3, stride=1, padding=1, **kwargs):
         conv = nn.Conv2d(self.current_channels, out_channels, kernel_size, stride, padding)
-        
         block = self._apply_utils(conv, **kwargs, norm_dim=out_channels)
+        
         self.layers.append(block)
 
         self.current_channels = out_channels
@@ -61,4 +60,7 @@ class CNN(BaseModel):
         return self
 
     def forward(self, x):
-        return self.model(x)
+        out = x
+        for layer in self.layers:
+            out = layer(out)
+        return out
