@@ -24,7 +24,7 @@ Copy of iSE Training.pdf
 *.wav
 
 # txt file
-*.txt
+note.txt
 
 # docx file
 *.docx
