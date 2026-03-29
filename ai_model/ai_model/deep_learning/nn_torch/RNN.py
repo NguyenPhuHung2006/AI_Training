@@ -25,8 +25,7 @@ class RNN(BaseModel):
         self.pad_token = None
 
     def add_embedding(self, vocab_size, embed_dim):
-        pad_id = self.pad_token if self.pad_token is not None else 0
-        self.embeddings = nn.Embedding(vocab_size, embed_dim, padding_idx=pad_id)
+        self.embeddings = nn.Embedding(vocab_size, embed_dim, padding_idx=self.pad_token)
         self.input_size = embed_dim
         return self
 
@@ -52,6 +51,38 @@ class RNN(BaseModel):
         self.output_size = out_features
         return self
 
+    # def forward(self, x):
+    #     x = x.to(self.device)
+    #     lengths = (x != self.pad_token).sum(dim=1).cpu()
+
+    #     # Embedding
+    #     if self.embeddings is not None and x.dim() == 2:
+    #         x = self.embeddings(x.long())
+
+    #     x_packed = nn.utils.rnn.pack_padded_sequence(
+    #         x, lengths, batch_first=True, enforce_sorted=False
+    #     )
+
+    #     _, hidden = self.rnn(x_packed)
+
+    #     if isinstance(hidden, tuple):
+    #         h_n = hidden[0]
+    #     else:
+    #         h_n = hidden
+
+    #     batch_size = h_n.size(1)
+
+    #     if self.rnn.bidirectional:
+    #         h_n = h_n.view(self.rnn.num_layers, 2, batch_size, self.rnn.hidden_size)
+    #         x = torch.cat([h_n[-1, 0], h_n[-1, 1]], dim=1)
+    #     else:
+    #         x = h_n[-1]
+            
+    #     for fc in self.fc_layers:
+    #         x = fc(x)
+
+    #     return x
+    
     def forward(self, x):
         x = x.to(self.device)
 
