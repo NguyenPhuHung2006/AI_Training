@@ -70,6 +70,23 @@ class TextCNN(BaseModel):
         self.flatten_dim = n_units
         return self
 
+    def build(self):
+        self.to(self.device)
+        embed_params = list(self.embedding.parameters()) if self.embedding else []
+        embed_ids = set(map(id, embed_params))
+        
+        main_params = [p for p in self.parameters() if id(p) not in embed_ids]
+        
+        if embed_params:
+            params = [
+                {'params': main_params, 'lr': self.lr},
+                {'params': embed_params, 'lr': self.lr * 0.1}
+            ]
+        else:
+            params = [{'params': main_params, 'lr': self.lr}]
+        
+        super().build(params)
+
     # conv1d: 
     # -> input:  (batch_size, in_channels, sequence_length)
     # -> output: (batch, out_channels, new_seq_len)
