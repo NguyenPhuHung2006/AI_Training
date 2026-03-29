@@ -88,23 +88,8 @@ class BaseModel(nn.Module):
         self.scheduler = self.configs["scheduler"][name](self.optimizer, **kwargs)
         return self
 
-    def build(self):        
-        self.to(self.device)
-
-        embed_params = list(self.embeddings.parameters()) if hasattr(self, 'embeddings') and self.embeddings else []
-        embed_ids = set(map(id, embed_params))
-
-        main_params = [p for p in self.parameters() if id(p) not in embed_ids]
-
-        if embed_params:
-            params_to_train = [
-                {'params': main_params, 'lr': self.lr},
-                {'params': embed_params, 'lr': self.lr * 10} 
-            ]
-        else:
-            params_to_train = [{'params': main_params, 'lr': self.lr}]
-            
-        self.optimizer = optim.Adam(params_to_train, weight_decay=self.weight_decay)
+    def build(self, params):
+        self.optimizer = optim.Adam(params, weight_decay=self.weight_decay)
         return self
 
     def _to_tensor(self, X, y=None):

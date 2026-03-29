@@ -58,6 +58,12 @@ class CNN(BaseModel):
         self.layers.append(block)
         self.flatten_dim = n_units
         return self
+    
+    def build(self):
+        self.to(self.device)
+        main_params = [p for p in self.parameters()]
+        params = [{'params': main_params, 'lr': self.lr}]
+        super().build(params)
 
     def forward(self, x):
         out = x

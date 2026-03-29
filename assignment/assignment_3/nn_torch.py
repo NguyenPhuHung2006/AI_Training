@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import os
-from ai_model.deep_learning.nn_torch import MLP
+from ai_model.deep_learning.nn_torch import TabularMLP
 from ai_model.deep_learning.nn_torch.callback import EarlyStopping, ModelCheckpoint
 
 def process_dates(df):
@@ -182,7 +182,7 @@ def main():
     print("Unique labels:", len(np.unique(y_train)))
     print("Feature count:", X_train.shape[1])
 
-    model = MLP(
+    model = TabularMLP(
         cost="cce",
         lr=0.002,
         weight_decay=1e-4

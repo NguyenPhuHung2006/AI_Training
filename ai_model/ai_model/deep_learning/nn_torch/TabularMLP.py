@@ -2,14 +2,15 @@ from .BaseModel import BaseModel
 import torch
 import torch.nn as nn
 
-class MLP(BaseModel):
-    def __init__(self, input_dim=0, **kwargs):
+class TabularMLP(BaseModel):
+    def __init__(self, input_dim=0, embed_dim=None, **kwargs):
         super().__init__(**kwargs)
         self.embeddings = nn.ModuleDict()
         self.cat_cols = []
         self.num_cols = []
         self.total_embed_dim = 0
         self.current_dim = input_dim
+        self.embed_dim = embed_dim
 
     def add_embedding(self, col_index, vocab_size, embed_dim):
         self.embeddings[str(col_index)] = nn.Embedding(vocab_size, embed_dim)
@@ -29,6 +30,23 @@ class MLP(BaseModel):
         self.layers.append(block)
         self.current_dim = n_units
         return self
+    
+    def build(self):
+        self.to(self.device)
+        embed_params = list(self.embeddings.parameters()) if self.embeddings else []
+        embed_ids = set(map(id, embed_params))
+        
+        main_params = [p for p in self.parameters() if id(p) not in embed_ids]
+        
+        if embed_params:
+            params = [
+                {'params': main_params, 'lr': self.lr},
+                {'params': embed_params, 'lr': self.lr * 0.1}
+            ]
+        else:
+            params = [{'params': main_params, 'lr': self.lr}]
+        
+        super().build(params)
 
     def forward(self, x):
         features = []

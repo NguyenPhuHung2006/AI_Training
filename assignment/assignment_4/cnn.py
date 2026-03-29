@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 from ai_model.deep_learning.nn_torch import CNN
-from ai_model.deep_learning.nn_torch import MLP
 from ai_model.deep_learning.nn_torch.callback import EarlyStopping, ModelCheckpoint
 import matplotlib.pyplot as plt
 import os

@@ -19,13 +19,13 @@ class RNN(BaseModel):
         self.rnn = None
         self.fc_layers = nn.ModuleList()
 
-        self.embeddings = None
+        self.embedding = None
         self.output_size = None
 
         self.pad_token = None
 
     def add_embedding(self, vocab_size, embed_dim):
-        self.embeddings = nn.Embedding(vocab_size, embed_dim, padding_idx=self.pad_token)
+        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=self.pad_token)
         self.input_size = embed_dim
         return self
 
@@ -50,6 +50,23 @@ class RNN(BaseModel):
         self.input_size = out_features
         self.output_size = out_features
         return self
+    
+    def build(self):
+        self.to(self.device)
+        embed_params = list(self.embedding.parameters()) if self.embedding else []
+        embed_ids = set(map(id, embed_params))
+        
+        main_params = [p for p in self.parameters() if id(p) not in embed_ids]
+        
+        if embed_params:
+            params = [
+                {'params': main_params, 'lr': self.lr},
+                {'params': embed_params, 'lr': self.lr * 0.1}
+            ]
+        else:
+            params = [{'params': main_params, 'lr': self.lr}]
+        
+        super().build(params)
 
     # def forward(self, x):
     #     x = x.to(self.device)
@@ -87,8 +104,8 @@ class RNN(BaseModel):
         x = x.to(self.device)
 
         # Embedding
-        if self.embeddings is not None and x.dim() == 2:
-            x = self.embeddings(x.long())
+        if self.embedding is not None and x.dim() == 2:
+            x = self.embedding(x.long())
 
         # RNN
         x, hidden = self.rnn(x)
