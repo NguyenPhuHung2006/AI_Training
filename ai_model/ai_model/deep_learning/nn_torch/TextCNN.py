@@ -19,6 +19,7 @@ class TextCNN(BaseModel):
         self.pool_type = "max"
 
         self.flatten_dim = 0
+        self.pool_dropout = 0
 
     def add_embedding(self, vocab_size, embed_dim):
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=self.pad_token)
@@ -39,10 +40,11 @@ class TextCNN(BaseModel):
 
         return self
 
-    def add_pool(self, pool_type):
+    def add_pool(self, pool_type, pool_dropout=0):
         if pool_type not in self.pool_types:
             raise ValueError(f"Invalid pool type: {pool_type}")
         self.pool_type = pool_type
+        self.pool_dropout = pool_dropout
         return self
 
     def add_fc(self, n_units, **kwargs):
@@ -83,6 +85,9 @@ class TextCNN(BaseModel):
 
         # concat all branches
         out = torch.cat(conv_outputs, dim=1)  # (batch, total_channels)
+        
+        if self.pool_dropout > 0:
+            out = F.dropout(out, p=self.pool_dropout, training=self.training)
 
         # fully connected layers
         for layer in self.layers:
