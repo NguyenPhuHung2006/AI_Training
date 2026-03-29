@@ -71,20 +71,20 @@ def main():
     
     model = TextCNN(
         cost="bce",
-        lr=2e-4,
+        lr=5e-4,
         weight_decay=1e-3
     )
 
     model.pad_token = pad_id
     model.add_embedding(vocab_size=vocab_size, embed_dim=256)
 
-    model.add_filter(out_channels=256, kernel_size=3, activation="relu", dropout=0.4)
-    model.add_filter(out_channels=256, kernel_size=4, activation="relu", dropout=0.3)
-    model.add_filter(out_channels=100, kernel_size=5, activation="relu", dropout=0.3)
+    model.add_filter(out_channels=256, kernel_size=3, activation="relu", dropout=0.2)
+    model.add_filter(out_channels=256, kernel_size=4, activation="relu", dropout=0.2)
+    model.add_filter(out_channels=100, kernel_size=5, activation="relu", dropout=0.2)
 
-    model.add_pool("max", pool_dropout=0.5)
+    model.add_pool("max", pool_dropout=0.4)
 
-    model.add_fc(n_units=256, activation="relu", norm="batch", dropout=0.4)
+    model.add_fc(n_units=256, activation="relu", dropout=0.3)
     model.add_fc(n_units=1)
     model.build()
     
