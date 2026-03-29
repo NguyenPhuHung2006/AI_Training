@@ -68,33 +68,27 @@ def main():
     X_train, y_train = get_tokenize(df_train, tokenizer, has_label=True, MAX_T=MAX_T, pad_id=pad_id)
     X_test, _ = get_tokenize(df_test, tokenizer, has_label=False, MAX_T=MAX_T, pad_id=pad_id)
     vocab_size = tokenizer.get_vocab_size()
-
-    # model = RNN(mode="many_to_one", cost="bce", lr=5e-4)
-    # model.pad_token = pad_id
-    # model.sos_token = sos_id
-    # model.eos_token = eos_id
-    # model.add_embedding(vocab_size=vocab_size, embed_dim=128)
-    # model.add_rnn(hidden_size=256, num_layers=2, dropout=0.3, bidirectional=True)
-    # model.add_fc(1)
-    # model.build()
     
     model = TextCNN(
         cost="bce",
-        lr=5e-4
+        lr=2e-4,
+        weight_decay=1e-3
     )
 
     model.pad_token = pad_id
-    model.add_embedding(vocab_size=vocab_size, embed_dim=128)
+    model.add_embedding(vocab_size=vocab_size, embed_dim=256)
 
-    model.add_filter(out_channels=100, kernel_size=3, activation="relu", norm="batch", dropout=0.3)
-    model.add_filter(out_channels=100, kernel_size=4, activation="relu", norm="batch", dropout=0.2)
-    model.add_filter(out_channels=100, kernel_size=5, activation="relu", norm="batch", dropout=0.2)
+    model.add_filter(out_channels=256, kernel_size=3, activation="relu", dropout=0.4)
+    model.add_filter(out_channels=256, kernel_size=4, activation="relu", dropout=0.3)
+    model.add_filter(out_channels=100, kernel_size=5, activation="relu", dropout=0.3)
 
-    model.add_pool("max")
+    model.add_pool("max", pool_dropout=0.5)
 
-    model.add_fc(n_units=128, activation="relu", norm="batch", dropout=0.1)
+    model.add_fc(n_units=256, activation="relu", norm="batch", dropout=0.4)
     model.add_fc(n_units=1)
     model.build()
+    
+    model.set_scheduler("reduce_on_plateau", mode="min", factor=0.5, patience=3)
     
     nn_data_path = "nn_data"
     os.makedirs(nn_data_path, exist_ok=True)
@@ -106,14 +100,14 @@ def main():
     # reload the model
     # model.load(f"{nn_data_path}/rnn_{i - 1}.pth")
 
-    callbacks = [EarlyStopping(patience=5), ModelCheckpoint(f"{nn_data_path}/rnn_{i}.pth")]
+    callbacks = [EarlyStopping(patience=7), ModelCheckpoint(f"{nn_data_path}/rnn_{i}.pth")]
     
     print(f"Starting training with Vocab Size: {vocab_size} and Max Sequence: {X_train.shape[1]}")
     
     model.fit(
         X_train, 
         y_train, 
-        epochs=1, 
+        epochs=100, 
         batch_size=32, 
         callbacks=callbacks
     )
