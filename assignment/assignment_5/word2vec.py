@@ -38,7 +38,7 @@ def tokenizing(df):
         "<sos>",
         "<eos>"
     ])
-    tokenizer.train(files=["temp_code.txt"], vocab_size=5000, min_frequency=2)
+    tokenizer.train(files=["temp_code.txt"], vocab_size=10000, min_frequency=2)
     os.remove("temp_code.txt")
     
     return tokenizer
@@ -88,7 +88,7 @@ df_code = pd.concat([
     df_test[["code"]]
 ], axis=0, ignore_index=True)
 
-tokenizer = tokenizing(df_train)
+tokenizer = tokenizing(df_code)
 
 # Build Word2Vec training data
 sentences = build_w2v_sentences(df_code, tokenizer)

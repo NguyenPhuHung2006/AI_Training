@@ -61,26 +61,32 @@ def main():
     df_train = preprocessing_data("data/train.csv")
     df_test = preprocessing_data("data/test.csv", has_label=False)
     
-    tokenizer = tokenizing(df_train)
+    # tokenizer = tokenizing(df_train)
+    tokenizer = ByteLevelBPETokenizer(
+        "nn_data/tokenizer/vocab.json",
+        "nn_data/tokenizer/merges.txt"
+    )
     pad_id = tokenizer.token_to_id("<pad>")
     
-    MAX_T = 200
+    MAX_T = 400
     X_train, y_train = get_tokenize(df_train, tokenizer, has_label=True, MAX_T=MAX_T, pad_id=pad_id)
     X_test, _ = get_tokenize(df_test, tokenizer, has_label=False, MAX_T=MAX_T, pad_id=pad_id)
     vocab_size = tokenizer.get_vocab_size()
     
     model = TextCNN(
         cost="bce",
-        lr=5e-4,
-        weight_decay=1e-3
+        lr=3e-4,
+        weight_decay=1e-4
     )
 
     model.pad_token = pad_id
-    model.add_embedding(vocab_size=vocab_size, embed_dim=256)
+    # model.add_embedding(vocab_size=vocab_size, embed_dim=256)
+    embedding_matrix = torch.load("nn_data/embedding.pt", weights_only=False)
+    model.set_embedding_matrix(embedding_matrix)
 
-    model.add_filter(out_channels=256, kernel_size=3, activation="relu", dropout=0.2)
-    model.add_filter(out_channels=256, kernel_size=4, activation="relu", dropout=0.2)
-    model.add_filter(out_channels=100, kernel_size=5, activation="relu", dropout=0.2)
+    model.add_filter(out_channels=128, kernel_size=2, activation="relu", dropout=0.2)
+    model.add_filter(out_channels=128, kernel_size=3, activation="relu", dropout=0.2)
+    model.add_filter(out_channels=128, kernel_size=5, activation="relu", dropout=0.2)
 
     model.add_pool("max", pool_dropout=0.4)
 
