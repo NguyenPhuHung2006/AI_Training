@@ -4,59 +4,48 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class TextCNN(BaseModel):
-    def __init__(self, input_size=None, **kwargs):
+    def __init__(self, in_channels=None, **kwargs):
         super().__init__(**kwargs)
 
         self.embedding = None
-        self.embed_dim = None
-        self.pad_id = None
+        self.pad_token = None
+        self.in_channels = in_channels
 
-        self.flatten_dim = None
+        self.conv_blocks = nn.ModuleList()
+        self.pool_types = {
+            "max": lambda x: F.max_pool1d(x, x.size(2)).squeeze(2),
+            "avg": lambda x: F.avg_pool1d(x, x.size(2)).squeeze(2),
+        }
+        self.pool_type = "max"
 
-    def add_embedding(self, vocab_size, embed_dim, pad_id=None):
-        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=pad_id)
-        self.embed_dim = embed_dim
-        self.pad_id = pad_id
+        self.flatten_dim = 0
+
+    def add_embedding(self, vocab_size, embed_dim):
+        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=self.pad_token)
+        self.in_channels = embed_dim
         return self
 
     def add_filter(self, out_channels, kernel_size, **kwargs):
-        if self.embed_dim is None:
-            raise ValueError("Call add_embedding() before add_filter()")
-
         conv = nn.Conv1d(
-            in_channels=self.embed_dim,
+            in_channels=self.in_channels,
             out_channels=out_channels,
             kernel_size=kernel_size
         )
 
         block = self._apply_utils(conv, **kwargs, norm_dim=out_channels)
+
         self.conv_blocks.append(block)
+        self.flatten_dim += out_channels
 
         return self
 
-    # ✅ Pool control (optional)
-    def add_pool(self, pool_type="max"):
-        if pool_type != "max":
-            raise ValueError("TextCNN only supports global max pooling")
-        self.use_pool = True
+    def add_pool(self, pool_type):
+        if pool_type not in self.pool_types:
+            raise ValueError(f"Invalid pool type: {pool_type}")
+        self.pool_type = pool_type
         return self
 
-    # ✅ Build conv output size
-    def build_conv_output(self):
-        total_channels = 0
-
-        for block in self.conv_blocks:
-            conv = block[0] if isinstance(block, nn.Sequential) else block
-            total_channels += conv.out_channels
-
-        self.flatten_dim = total_channels
-        return self
-
-    # ✅ FC layer (reuse your style)
     def add_fc(self, n_units, **kwargs):
-        if self.flatten_dim is None:
-            raise ValueError("Call build_conv_output() before add_fc()")
-
         fc = nn.Linear(self.flatten_dim, n_units)
         block = self._apply_utils(fc, **kwargs, norm_dim=n_units)
 
@@ -64,33 +53,38 @@ class TextCNN(BaseModel):
         self.flatten_dim = n_units
         return self
 
-    def build(self):
-        self.conv_blocks = nn.ModuleList(self.conv_blocks)
-        super().build()
-
+    # conv1d: 
+    # -> input:  (batch_size, in_channels, sequence_length)
+    # -> output: (batch, out_channels, new_seq_len)
+    # x: 
+    # -> (batch, seq_len) or (batch, seq_len, embed_dim) if embedded
+    # embedding:
+    # -> input:  (batch, seq_len)
+    # -> output: (batch, seq_len, embed_dim)
     def forward(self, x):
-        # x: (batch, seq_len)
+        if self.embedding is not None:
+            # (batch, seq_len) -> (batch, seq_len, embed_dim)
+            x = self.embedding(x.long())
 
-        if self.embedding is None:
-            raise ValueError("Embedding not defined")
-
-        x = self.embedding(x)          # (batch, seq_len, embed_dim)
-        x = x.transpose(1, 2)          # (batch, embed_dim, seq_len)
+        # -> (batch, embed_dim, seq_len)
+        x = x.transpose(1, 2)
 
         conv_outputs = []
 
+        if len(self.conv_blocks) == 0:
+            raise ValueError("No convolution filters added")
         for block in self.conv_blocks:
-            c = block(x)               # (batch, out_channels, L)
-            c = F.relu(c)
+            c = block(x)  # (batch, out_channels, L)
+            
+            # global pooling
+            c = self.pool_types[self.pool_type](c)  # (batch, out_channels)
 
-            if self.use_pool:
-                c = F.max_pool1d(c, c.size(2))  # global max pool
-
-            c = c.squeeze(2)           # (batch, out_channels)
             conv_outputs.append(c)
 
+        # concat all branches
         out = torch.cat(conv_outputs, dim=1)  # (batch, total_channels)
 
+        # fully connected layers
         for layer in self.layers:
             out = layer(out)
 
