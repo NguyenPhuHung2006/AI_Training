@@ -68,7 +68,7 @@ def main():
     )
     pad_id = tokenizer.token_to_id("<pad>")
     
-    MAX_T = 400
+    MAX_T = 200
     X_train, y_train = get_tokenize(df_train, tokenizer, has_label=True, MAX_T=MAX_T, pad_id=pad_id)
     X_test, _ = get_tokenize(df_test, tokenizer, has_label=False, MAX_T=MAX_T, pad_id=pad_id)
     vocab_size = tokenizer.get_vocab_size()
@@ -76,21 +76,22 @@ def main():
     model = TextCNN(
         cost="bce",
         lr=3e-4,
-        weight_decay=1e-4
+        weight_decay=5e-4
     )
 
     model.pad_token = pad_id
     # model.add_embedding(vocab_size=vocab_size, embed_dim=256)
     embedding_matrix = torch.load("nn_data/embedding.pt", weights_only=False)
     model.set_embedding_matrix(embedding_matrix)
+    model.embedding.weight.requires_grad = True
 
-    model.add_filter(out_channels=128, kernel_size=2, activation="relu", dropout=0.2)
-    model.add_filter(out_channels=128, kernel_size=3, activation="relu", dropout=0.2)
-    model.add_filter(out_channels=128, kernel_size=5, activation="relu", dropout=0.2)
+    # model.add_filter(out_channels=96, kernel_size=2, activation="relu", dropout=0.3)
+    model.add_filter(out_channels=96, kernel_size=3, activation="relu", dropout=0.3)
+    model.add_filter(out_channels=96, kernel_size=5, activation="relu", dropout=0.3)
 
-    model.add_pool("max", pool_dropout=0.4)
+    model.add_pool("max", pool_dropout=0.5)
 
-    model.add_fc(n_units=256, activation="relu", dropout=0.3)
+    model.add_fc(n_units=128, activation="relu", dropout=0.5)
     model.add_fc(n_units=1)
     model.build()
     
@@ -106,7 +107,7 @@ def main():
     # reload the model
     # model.load(f"{nn_data_path}/rnn_{i - 1}.pth")
 
-    callbacks = [EarlyStopping(patience=7), ModelCheckpoint(f"{nn_data_path}/rnn_{i}.pth")]
+    callbacks = [EarlyStopping(patience=5), ModelCheckpoint(f"{nn_data_path}/rnn_{i}.pth")]
     
     print(f"Starting training with Vocab Size: {vocab_size} and Max Sequence: {X_train.shape[1]}")
     
