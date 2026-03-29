@@ -25,6 +25,21 @@ class TextCNN(BaseModel):
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=self.pad_token)
         self.in_channels = embed_dim
         return self
+    
+    def set_embedding_matrix(self, embedding_matrix, freeze=False):
+        if not isinstance(embedding_matrix, torch.Tensor):
+            raise TypeError("embedding_matrix must be a torch.Tensor")
+
+        vocab_size, embed_dim = embedding_matrix.shape
+
+        self.embedding = nn.Embedding.from_pretrained(
+            embedding_matrix,
+            freeze=freeze,
+            padding_idx=self.pad_token
+        )
+
+        self.in_channels = embed_dim
+        return self
 
     def add_filter(self, out_channels, kernel_size, **kwargs):
         conv = nn.Conv1d(
