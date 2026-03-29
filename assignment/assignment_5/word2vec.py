@@ -5,7 +5,7 @@ import os
 from tokenizers import ByteLevelBPETokenizer
 import numpy as np
 import random
-from sklearn.preprocessing import normalize
+import torch.nn.functional as F
 random.seed(42)
 np.random.seed(42)
 
@@ -98,7 +98,7 @@ w2v = train_word2vec(sentences, embed_dim=256)
 
 # Build embedding matrix
 embedding_matrix = build_embedding_matrix(tokenizer, w2v, embed_dim=256)
-embedding_matrix = normalize(embedding_matrix)
+embedding_matrix = F.normalize(embedding_matrix, p=2, dim=1)
 
 torch.save(embedding_matrix, "nn_data/embedding.pt")
 tokenizer.save_model("nn_data/tokenizer/")
