@@ -31,6 +31,11 @@ def tokenizing(df):
             f.write(code_snippet + "\n")
 
     tokenizer = ByteLevelBPETokenizer()
+    tokenizer.add_special_tokens([
+        "<pad>",
+        "<sos>",
+        "<eos>"
+    ])
     tokenizer.train(files=["temp_code.txt"], vocab_size=5000, min_frequency=2)
     os.remove("temp_code.txt")
     
@@ -57,11 +62,6 @@ def main():
     df_test = preprocessing_data("data/test.csv", has_label=False)
     
     tokenizer = tokenizing(df_train)
-    tokenizer.add_special_tokens([
-        "<pad>",
-        "<sos>",
-        "<eos>"
-    ])
     pad_id = tokenizer.token_to_id("<pad>")
     sos_id = tokenizer.token_to_id("<sos>")
     eos_id = tokenizer.token_to_id("<eos>")
