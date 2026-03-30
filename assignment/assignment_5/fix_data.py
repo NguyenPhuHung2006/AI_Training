@@ -1,24 +1,17 @@
-import pandas as pd
+import re
 
-# Load CSV
-df = pd.read_csv(
-    "data/train.csv",
-    usecols=["ID", "code", "Label"],  # only the 3 columns you need
-)
+def fix_commas(text: str) -> str:
+    text = re.sub(r'(?<!})",{2,}', '",', text)
+    text = re.sub(r',+', ',', text)
+    return text
 
-# Replace NaN with an empty string (or something else)
-df = df.fillna('')
+with open("data/test.csv", "r", encoding="utf-8") as f:
+    content = f.read()
 
-# Use a safe separator
-sep = '\x1f'
+fixed = fix_commas(content)
 
-# Combine columns as strings
-df['combined'] = df['ID'].astype(str) + sep + df['code'].astype(str) + sep + df['Label'].astype(str)
-
-# Write to TXT
-with open("data/combined.txt", "w", encoding="utf-8") as f:
-    for line in df['combined']:
-        f.write(str(line) + "\n")  # ensure it's a string
-
-
+with open("data/test_fixed.csv", "w", encoding="utf-8") as f:
+    f.write(fixed)
+    
+    
 print("completed")
