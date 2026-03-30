@@ -23,12 +23,15 @@ Copy of iSE Training.pdf
 # sound file
 *.wav
 
-# txt file
-note.txt
-
 # docx file
 *.docx
 
 # picture file
 *.png
 *.jpg
+
+# other file
+*.txt
+*.npz
+*.npy
+*.json
