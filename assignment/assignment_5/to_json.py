@@ -23,7 +23,7 @@ def normalize_identifiers(code: str) -> str:
 
         if word in KEYWORDS or word in SPECIAL_TOKENS:
             return word
-        elif word.isupper():
+        elif re.fullmatch(r'[A-Z_][A-Z0-9_]*', word):
             return "CONST"
         elif word[0].isupper():
             return "TYPE"
