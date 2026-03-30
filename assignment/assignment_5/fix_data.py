@@ -1,8 +1,8 @@
 import re
 
 def fix_commas(text: str) -> str:
-    text = re.sub(r'(?<!})",{2,}', '",', text)
-    text = re.sub(r',+', ',', text)
+    text = re.sub(r'(?:(?<=^)|(?<="))",', '', text)
+    # text = re.sub(r'([a-zA-Z0-9_])",', r'\1"",', text)
     return text
 
 with open("data/test.csv", "r", encoding="utf-8") as f:
