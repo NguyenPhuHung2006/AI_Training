@@ -4,11 +4,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class TextCNN(BaseModel):
-    def __init__(self, in_channels=None, **kwargs):
+    def __init__(self, in_channels=None, pad_id=None, **kwargs):
         super().__init__(**kwargs)
 
         self.embedding = None
-        self.pad_token = None
+        self.pad_id = pad_id
         self.in_channels = in_channels
 
         self.conv_blocks = nn.ModuleList()
@@ -22,7 +22,7 @@ class TextCNN(BaseModel):
         self.pool_dropout = 0
 
     def add_embedding(self, vocab_size, embed_dim):
-        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=self.pad_token)
+        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=self.pad_id)
         self.in_channels = embed_dim
         return self
     
@@ -35,7 +35,7 @@ class TextCNN(BaseModel):
         self.embedding = nn.Embedding.from_pretrained(
             embedding_matrix,
             freeze=freeze,
-            padding_idx=self.pad_token
+            padding_idx=self.pad_id
         )
 
         self.in_channels = embed_dim

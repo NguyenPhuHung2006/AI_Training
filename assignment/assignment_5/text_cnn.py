@@ -64,7 +64,6 @@ def main():
     # tokenizer = tokenizing(df_train)
     tokenizer = Tokenizer.from_file("nn_data/tokenizer/tokenizer.json")
     pad_id = tokenizer.token_to_id("<pad>")
-    print(pad_id)
     
     MAX_T = 300
     X_train, y_train = get_tokenize(df_train, tokenizer, has_label=True, MAX_T=MAX_T, pad_id=pad_id)
@@ -74,7 +73,8 @@ def main():
     model = TextCNN(
         cost="bce",
         lr=1e-3,
-        weight_decay=5e-4
+        weight_decay=5e-4,
+        pad_id=pad_id
     )
 
     model.pad_token = pad_id
