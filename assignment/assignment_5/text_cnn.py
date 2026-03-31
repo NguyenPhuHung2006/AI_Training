@@ -68,14 +68,14 @@ def main():
     )
     pad_id = tokenizer.token_to_id("<pad>")
     
-    MAX_T = 200
+    MAX_T = 300
     X_train, y_train = get_tokenize(df_train, tokenizer, has_label=True, MAX_T=MAX_T, pad_id=pad_id)
     X_test, _ = get_tokenize(df_test, tokenizer, has_label=False, MAX_T=MAX_T, pad_id=pad_id)
     vocab_size = tokenizer.get_vocab_size()
     
     model = TextCNN(
         cost="bce",
-        lr=3e-4,
+        lr=1e-3,
         weight_decay=5e-4
     )
 
@@ -85,13 +85,14 @@ def main():
     model.set_embedding_matrix(embedding_matrix)
     model.embedding.weight.requires_grad = True
 
-    # model.add_filter(out_channels=96, kernel_size=2, activation="relu", dropout=0.3)
-    model.add_filter(out_channels=96, kernel_size=3, activation="relu", dropout=0.3)
-    model.add_filter(out_channels=96, kernel_size=5, activation="relu", dropout=0.3)
+    model.add_filter(out_channels=64, kernel_size=2, activation="relu", dropout=0.4)
+    model.add_filter(out_channels=64, kernel_size=3, activation="relu", dropout=0.4)
+    model.add_filter(out_channels=64, kernel_size=5, activation="relu", dropout=0.4)
+    model.add_filter(out_channels=64, kernel_size=7, activation="relu", dropout=0.4)
 
-    model.add_pool("max", pool_dropout=0.5)
+    model.add_pool("max", pool_dropout=0.6)
 
-    model.add_fc(n_units=128, activation="relu", dropout=0.5)
+    model.add_fc(n_units=128, activation="relu", dropout=0.6)
     model.add_fc(n_units=1)
     model.build()
     
@@ -101,13 +102,13 @@ def main():
     os.makedirs(nn_data_path, exist_ok=True)
     
     i = 0
-    while os.path.exists(f"{nn_data_path}/rnn_{i}.pth"):
+    while os.path.exists(f"{nn_data_path}/text_cnn_{i}.pth"):
         i += 1
         
     # reload the model
     # model.load(f"{nn_data_path}/rnn_{i - 1}.pth")
 
-    callbacks = [EarlyStopping(patience=5), ModelCheckpoint(f"{nn_data_path}/rnn_{i}.pth")]
+    callbacks = [EarlyStopping(patience=3), ModelCheckpoint(f"{nn_data_path}/text_cnn_{i}.pth")]
     
     print(f"Starting training with Vocab Size: {vocab_size} and Max Sequence: {X_train.shape[1]}")
     
