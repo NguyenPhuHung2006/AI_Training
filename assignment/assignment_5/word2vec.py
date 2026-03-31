@@ -101,5 +101,6 @@ embedding_matrix = build_embedding_matrix(tokenizer, w2v, embed_dim=256)
 embedding_matrix = F.normalize(embedding_matrix, p=2, dim=1)
 
 torch.save(embedding_matrix, "nn_data/embedding.pt")
-tokenizer.save_model("nn_data/tokenizer/")
+os.makedirs("nn_data/tokenizer", exist_ok=True)
+tokenizer.save("nn_data/tokenizer/tokenizer.json")
 print("completed")

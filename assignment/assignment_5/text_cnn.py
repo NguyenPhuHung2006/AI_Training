@@ -4,7 +4,7 @@ import os
 from torch.nn.utils.rnn import pad_sequence
 from ai_model.deep_learning.nn_torch import TextCNN
 from ai_model.deep_learning.nn_torch.callback import EarlyStopping, ModelCheckpoint
-from tokenizers import ByteLevelBPETokenizer
+from tokenizers import ByteLevelBPETokenizer, Tokenizer
 import numpy as np
 
 def preprocessing_data(file_path, has_label=True):
@@ -62,11 +62,9 @@ def main():
     df_test = preprocessing_data("data/test_clean_code.csv", has_label=False)
     
     # tokenizer = tokenizing(df_train)
-    tokenizer = ByteLevelBPETokenizer(
-        "nn_data/tokenizer/vocab.json",
-        "nn_data/tokenizer/merges.txt"
-    )
+    tokenizer = Tokenizer.from_file("nn_data/tokenizer/tokenizer.json")
     pad_id = tokenizer.token_to_id("<pad>")
+    print(pad_id)
     
     MAX_T = 300
     X_train, y_train = get_tokenize(df_train, tokenizer, has_label=True, MAX_T=MAX_T, pad_id=pad_id)

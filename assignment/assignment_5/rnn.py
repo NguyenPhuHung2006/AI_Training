@@ -4,7 +4,7 @@ import os
 from torch.nn.utils.rnn import pad_sequence
 from ai_model.deep_learning.nn_torch import RNN
 from ai_model.deep_learning.nn_torch.callback import EarlyStopping, ModelCheckpoint
-from tokenizers import ByteLevelBPETokenizer
+from tokenizers import ByteLevelBPETokenizer, Tokenizer
 import numpy as np
 
 def preprocessing_data(file_path, has_label=True):
@@ -58,25 +58,33 @@ def get_tokenize(df, tokenizer, MAX_T=1024, has_label=True, pad_id=None):
     return padded_sequences, labels_tensor
 
 def main():
-    df_train = preprocessing_data("data/train.csv")
-    df_test = preprocessing_data("data/test.csv", has_label=False)
+    df_train = preprocessing_data("data/train_clean_code.csv")
+    df_test = preprocessing_data("data/test_clean_code.csv", has_label=False)
     
-    tokenizer = tokenizing(df_train)
+    # tokenizer = tokenizing(df_train)
+    tokenizer = Tokenizer.from_file("nn_data/tokenizer/tokenizer.json")
     pad_id = tokenizer.token_to_id("<pad>")
-    sos_id = tokenizer.token_to_id("<sos>")
-    eos_id = tokenizer.token_to_id("<eos>")
     
     MAX_T = 200
     X_train, y_train = get_tokenize(df_train, tokenizer, has_label=True, MAX_T=MAX_T, pad_id=pad_id)
     X_test, _ = get_tokenize(df_test, tokenizer, has_label=False, MAX_T=MAX_T, pad_id=pad_id)
     vocab_size = tokenizer.get_vocab_size()
 
-    model = RNN(mode="many_to_one", cost="bce", lr=5e-4)
-    model.pad_token = pad_id
-    model.sos_token = sos_id
-    model.eos_token = eos_id
-    model.add_embedding(vocab_size=vocab_size, embed_dim=128)
+    model = RNN(
+        mode="many_to_one", 
+        cost="bce", 
+        lr=5e-4, 
+        use_packing=False, 
+        pad_id=pad_id
+    )
+    
+    # model.add_embedding(vocab_size=vocab_size, embed_dim=128)
+    embedding_matrix = torch.load("nn_data/embedding.pt", weights_only=False)
+    model.set_embedding_matrix(embedding_matrix)
+    model.embedding.weight.requires_grad = True
+    
     model.add_rnn(hidden_size=256, num_layers=2, dropout=0.3, bidirectional=True)
+    model.add_attention()
     model.add_fc(1)
     model.build()
     
