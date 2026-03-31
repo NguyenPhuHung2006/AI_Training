@@ -78,10 +78,10 @@ def clean_code(code: str) -> str:
     code = re.sub(r'\b\d+\b', 'NUM', code)
 
     # 5. Detect function calls
-    code = re.sub(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b(?=\s*\()', replace_func, code)
+    # code = re.sub(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b(?=\s*\()', replace_func, code)
 
     # 6. Normalize identifiers
-    code = normalize_identifiers(code)
+    # code = normalize_identifiers(code)
 
     # 7. Operators
     code = re.sub(r'([=!<>]=|&&|\|\|)', r' \1 ', code)
@@ -105,7 +105,21 @@ def clean_code(code: str) -> str:
 # -------------------------
 # Load data
 # -------------------------
-df = pd.read_csv("data/test.csv", usecols=["ID", "code"]).fillna('')
+
+cols = ['ID', 'clean_code']
+orig_cols = ['ID', 'code']
+file_path = "data/test_clean_code.csv"
+orig_file_path = "data/test.csv"
+
+is_train = False
+if is_train:
+    cols.append('Label')
+    orig_cols.append('Label')
+    file_path = "data/train_clean_code.csv"
+    orig_file_path = "data/train.csv"
+
+    
+df = pd.read_csv(orig_file_path, usecols=orig_cols).fillna('')
 
 # Apply cleaning
 df['clean_code'] = df['code'].apply(clean_code)
@@ -127,14 +141,14 @@ df = df[df['clean_code'].str.len() > 0]
 
 # print("Export completed: data/clean_code.jsonl")
 
-df_to_save = df[['ID', 'clean_code']].copy()
-df_to_save.columns = ['ID', 'code']  # keep original naming
+df_to_save = df[cols].copy()
+df_to_save.columns = orig_cols  # keep original naming
 
 df_to_save.to_csv(
-    "data/test_clean_code.csv",
+    file_path,
     index=False,
     encoding="utf-8",
     quoting=1  # csv.QUOTE_ALL (safe for messy text)
 )
 
-print("Export completed: data/test_clean_code.csv")
+print("Export completed: " + file_path)
