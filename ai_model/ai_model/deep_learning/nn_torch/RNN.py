@@ -73,8 +73,8 @@ class RNN(BaseModel):
     #     lengths = (x != self.pad_token).sum(dim=1).cpu()
 
     #     # Embedding
-    #     if self.embeddings is not None and x.dim() == 2:
-    #         x = self.embeddings(x.long())
+    #     if self.embedding is not None and x.dim() == 2:
+    #         x = self.embedding(x.long())
 
     #     x_packed = nn.utils.rnn.pack_padded_sequence(
     #         x, lengths, batch_first=True, enforce_sorted=False
