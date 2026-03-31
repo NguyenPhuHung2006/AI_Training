@@ -77,7 +77,6 @@ def main():
         pad_id=pad_id
     )
 
-    model.pad_token = pad_id
     # model.add_embedding(vocab_size=vocab_size, embed_dim=256)
     embedding_matrix = torch.load("nn_data/embedding.pt", weights_only=False)
     model.set_embedding_matrix(embedding_matrix)
