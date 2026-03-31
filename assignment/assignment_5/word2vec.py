@@ -81,8 +81,8 @@ def build_embedding_matrix(tokenizer, w2v, embed_dim):
     return torch.tensor(embedding_matrix, dtype=torch.float32)
 
 # main
-df_train = preprocessing_data("data/train.csv")
-df_test = preprocessing_data("data/test.csv", has_label=False)
+df_train = preprocessing_data("data/train_clean_code.csv")
+df_test = preprocessing_data("data/test_clean_code.csv", has_label=False)
 df_code = pd.concat([
     df_train[["code"]],
     df_test[["code"]]

@@ -58,8 +58,8 @@ def get_tokenize(df, tokenizer, MAX_T=1024, has_label=True, pad_id=None):
     return padded_sequences, labels_tensor
 
 def main():
-    df_train = preprocessing_data("data/train.csv")
-    df_test = preprocessing_data("data/test.csv", has_label=False)
+    df_train = preprocessing_data("data/train_clean_code.csv")
+    df_test = preprocessing_data("data/test_clean_code.csv", has_label=False)
     
     # tokenizer = tokenizing(df_train)
     tokenizer = ByteLevelBPETokenizer(
@@ -124,14 +124,21 @@ def main():
     y_pred = y_pred.flatten()
     
     df = pd.DataFrame({
-        "ID": np.arange(0, len(y_pred)),
+        "ID": df_test["ID"].tolist(),
         "Label": y_pred
     })
+    
+    df_temp = pd.DataFrame({
+        "ID": np.arange(0, 7000)
+    })
+    
+    df_final = df_temp.merge(df, on="ID", how="left")
+    df_final["Label"] = df_final["Label"].fillna(0).astype(int)
     
     output_path = "outputs/nn"
     os.makedirs(output_path, exist_ok=True)
 
-    df.to_csv(f"{output_path}/rnn.csv", index=False)
+    df_final.to_csv(f"{output_path}/text_cnn.csv", index=False)
     
 
 if __name__ == "__main__":

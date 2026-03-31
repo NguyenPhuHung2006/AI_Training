@@ -105,7 +105,7 @@ def clean_code(code: str) -> str:
 # -------------------------
 # Load data
 # -------------------------
-df = pd.read_csv("data/train.csv", usecols=["ID", "code", "Label"]).fillna('')
+df = pd.read_csv("data/test.csv", usecols=["ID", "code"]).fillna('')
 
 # Apply cleaning
 df['clean_code'] = df['code'].apply(clean_code)
@@ -116,13 +116,25 @@ df = df[df['clean_code'].str.len() > 0]
 # -------------------------
 # Export to JSONL
 # -------------------------
-with open("data/clean_code.jsonl", "w", encoding="utf-8") as f:
-    for _, row in df.iterrows():
-        json.dump({
-            "ID": str(row['ID']),
-            "code": row['clean_code'],
-            "Label": str(row['Label'])
-        }, f, ensure_ascii=False)
-        f.write("\n")
+# with open("data/clean_code.jsonl", "w", encoding="utf-8") as f:
+#     for _, row in df.iterrows():
+#         json.dump({
+#             "ID": str(row['ID']),
+#             "code": row['clean_code'],
+#             "Label": str(row['Label'])
+#         }, f, ensure_ascii=False)
+#         f.write("\n")
 
-print("Export completed: data/clean_code.jsonl")
+# print("Export completed: data/clean_code.jsonl")
+
+df_to_save = df[['ID', 'clean_code']].copy()
+df_to_save.columns = ['ID', 'code']  # keep original naming
+
+df_to_save.to_csv(
+    "data/test_clean_code.csv",
+    index=False,
+    encoding="utf-8",
+    quoting=1  # csv.QUOTE_ALL (safe for messy text)
+)
+
+print("Export completed: data/test_clean_code.csv")
