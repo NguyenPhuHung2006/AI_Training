@@ -4,6 +4,28 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
+from torch.utils.data import Dataset
+from torch.utils.data import Subset
+
+class NumpyDataset(Dataset):
+    def __init__(self, X, y):
+        self.X = X
+        self.y = y
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        x = self.X[idx]
+        y = self.y[idx]
+
+        # Only convert if it is NOT a tensor
+        if not isinstance(x, torch.Tensor):
+            x = torch.tensor(x, dtype=torch.float32)
+        if not isinstance(y, torch.Tensor):
+            y = torch.tensor(y)
+
+        return x, y
 
 class BaseModel(nn.Module):
     def __init__(self, cost="cce", lr=0.001, weight_decay=0.0, device=None):
@@ -130,96 +152,146 @@ class BaseModel(nn.Module):
             return loss, correct / total
 
     def fit(self, X, y, epochs=10, batch_size=64, val_split=0.1, callbacks=None):
-        callbacks = callbacks or []
-        if val_split > 0:
-            X_train, X_val, y_train, y_val = train_test_split(
-                X, y, test_size=val_split, random_state=42, 
-                stratify=y if isinstance(self.criterion, nn.CrossEntropyLoss) else None
-            )
-        else:
-            X_train, y_train = X, y
-            X_val = y_val = None
-            
-        X_train, y_train = self._to_tensor(X_train, y_train)
-        if X_val is not None:
-            X_val, y_val = self._to_tensor(X_val, y_val)
-        
-        dataset = TensorDataset(X_train, y_train)
-        loader = DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            pin_memory=torch.cuda.is_available(),
-            num_workers=4
-        )
-        
-        for cb in callbacks:
-            cb.on_train_begin(self)
+          callbacks = callbacks or []
 
-        for epoch in tqdm(range(epochs), desc="Training"):
-            if self.stop_training: 
-                break
-            
-            self.train()
-            
-            total_loss = 0
-            train_correct = 0
-            train_total = 0
-            
-            for xb, yb in loader:
-                self.optimizer.zero_grad()
-                out = self(xb)
-                loss = self.criterion(out, yb)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
-                self.optimizer.step()
-                total_loss += loss.item()
-                acc = self._accuracy(out, yb)
-                if acc is not None:
-                    correct, total = acc
-                    train_correct += correct
-                    train_total += total
-                
-            train_loss = total_loss / len(loader)
-            train_acc = train_correct / train_total if train_total > 0 else None
+          full_dataset = NumpyDataset(X, y)
 
-            val_loss = None
-            val_acc = None
-            if X_val is not None:
-                val_loss, val_acc = self._evaluate(X_val, y_val)
-                
-            if self.scheduler is not None:
-                if isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
-                    self.scheduler.step(val_loss if val_loss is not None else train_loss)
-                else:
-                    self.scheduler.step()
-                
-            # callback
-            self.history["train_loss"].append(train_loss)
-            self.history["train_acc"].append(train_acc)
-            self.history["val_loss"].append(val_loss)
-            self.history["val_acc"].append(val_acc)
-            logs = {
-                "train_loss": train_loss,
-                "train_acc": train_acc,
-                "val_loss": val_loss,
-                "val_acc": val_acc
-            }
-            for cb in callbacks:
-                cb.on_epoch_end(self, logs)
-            
-            msg = f"{epoch} | train_loss:{train_loss:.4f}"
+          if val_split > 0:
+              indices = list(range(len(X)))
 
-            if train_acc is not None:
-                msg += f" | train_acc:{train_acc*100:.2f}%"
+              train_idx, val_idx = train_test_split(
+                  indices,
+                  test_size=val_split,
+                  random_state=42,
+                  stratify=y if isinstance(self.criterion, nn.CrossEntropyLoss) else None
+              )
 
-            if val_loss is not None:
-                msg += f" | val_loss:{val_loss:.4f}"
+              train_dataset = Subset(full_dataset, train_idx)
+              val_dataset   = Subset(full_dataset, val_idx)
+          else:
+              train_dataset = full_dataset
+              val_dataset = None
 
-            if val_acc is not None:
-                msg += f" | val_acc:{val_acc*100:.2f}%"
+          # ---- DataLoaders ----
+          train_loader = DataLoader(
+              train_dataset,
+              batch_size=batch_size,
+              shuffle=True,
+              num_workers=0
+          )
 
-            tqdm.write(msg)
+          val_loader = None
+          if val_dataset is not None:
+              val_loader = DataLoader(
+                  val_dataset,
+                  batch_size=batch_size,
+                  shuffle=False,
+                  num_workers=0
+              )
+
+          # ---- Callbacks ----
+          for cb in callbacks:
+              cb.on_train_begin(self)
+
+          # ---- Training loop ----
+          for epoch in tqdm(range(epochs), desc="Training"):
+              if self.stop_training:
+                  break
+
+              self.train()
+
+              total_loss = 0
+              train_correct = 0
+              train_total = 0
+
+              for xb, yb in train_loader:
+                  xb = xb.to(self.device)
+                  yb = yb.to(self.device)
+
+                  self.optimizer.zero_grad()
+
+                  out = self(xb)
+                  loss = self.criterion(out, yb)
+
+                  loss.backward()
+                  torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+                  self.optimizer.step()
+
+                  total_loss += loss.item()
+
+                  acc = self._accuracy(out, yb)
+                  if acc is not None:
+                      correct, total = acc
+                      train_correct += correct
+                      train_total += total
+
+              train_loss = total_loss / len(train_loader)
+              train_acc = train_correct / train_total if train_total > 0 else None
+
+              # ---- Validation ----
+              val_loss = None
+              val_acc = None
+
+              if val_loader is not None:
+                  self.eval()
+                  v_loss = 0
+                  v_correct = 0
+                  v_total = 0
+
+                  with torch.no_grad():
+                      for xb, yb in val_loader:
+                          xb = xb.to(self.device)
+                          yb = yb.to(self.device)
+
+                          out = self(xb)
+                          loss = self.criterion(out, yb)
+
+                          v_loss += loss.item()
+
+                          acc = self._accuracy(out, yb)
+                          if acc is not None:
+                              correct, total = acc
+                              v_correct += correct
+                              v_total += total
+
+                  val_loss = v_loss / len(val_loader)
+                  val_acc = v_correct / v_total if v_total > 0 else None
+
+              # ---- Scheduler ----
+              if self.scheduler is not None:
+                  if isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+                      self.scheduler.step(val_loss if val_loss is not None else train_loss)
+                  else:
+                      self.scheduler.step()
+
+              # ---- Logging ----
+              self.history["train_loss"].append(train_loss)
+              self.history["train_acc"].append(train_acc)
+              self.history["val_loss"].append(val_loss)
+              self.history["val_acc"].append(val_acc)
+
+              logs = {
+                  "train_loss": train_loss,
+                  "train_acc": train_acc,
+                  "val_loss": val_loss,
+                  "val_acc": val_acc
+              }
+
+              for cb in callbacks:
+                  cb.on_epoch_end(self, logs)
+
+              msg = f"{epoch} | train_loss:{train_loss:.4f}"
+
+              if train_acc is not None:
+                  msg += f" | train_acc:{train_acc*100:.2f}%"
+
+              if val_loss is not None:
+                  msg += f" | val_loss:{val_loss:.4f}"
+
+              if val_acc is not None:
+                  msg += f" | val_acc:{val_acc*100:.2f}%"
+
+              tqdm.write(msg)
 
     def predict(self, X):
         if self.optimizer is None:
