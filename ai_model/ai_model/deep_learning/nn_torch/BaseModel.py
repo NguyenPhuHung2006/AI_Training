@@ -102,7 +102,7 @@ class BaseModel(nn.Module):
     def build(self, params):
         self.optimizer = optim.Adam(params, weight_decay=self.weight_decay)
         return self
-    
+
     def _accuracy(self, outputs, y):
         total = None
         if isinstance(self.criterion, nn.CrossEntropyLoss):
@@ -258,7 +258,7 @@ class BaseModel(nn.Module):
 
             tqdm.write(msg)
 
-    def predict(self, X):
+    def predict(self, X, batch_size=64):
         if self.optimizer is None:
             raise RuntimeError("Model not built. Call build() first.")
         
@@ -267,12 +267,24 @@ class BaseModel(nn.Module):
         if not isinstance(X, torch.Tensor):
             X = torch.tensor(X, dtype=torch.float32)
 
-        X = X.to(self.device)
+        dataset = torch.utils.data.TensorDataset(X)
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=True
+        )
+
+        outputs_list = []
 
         with torch.no_grad():
-            outputs = self(X)
+            for (xb,) in loader:
+                xb = xb.to(self.device, non_blocking=True)
+                out = self(xb)
+                outputs_list.append(out.cpu())
 
-        return outputs.cpu().numpy()
+        return torch.cat(outputs_list, dim=0).numpy()
 
     def save(self, path):
         save_dict = {
