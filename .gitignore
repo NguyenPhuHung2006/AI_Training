@@ -36,4 +36,5 @@ Copy of iSE Training.pdf
 *.npy
 *.json
 *.pt
+*.pth
 kaggle-environments-0.1.4/
