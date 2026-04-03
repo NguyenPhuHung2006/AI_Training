@@ -117,9 +117,10 @@ class RNN(BaseModel):
 
         if self.mode == "many_to_one":
             if self.attention is not None:
-                # Attention
+                current_max_len = outputs.size(1)
+                active_mask = mask[:, :current_max_len]
                 scores = self.attention(outputs).squeeze(-1)  # (batch, seq_len)
-                scores = scores.masked_fill(~mask, float('-inf'))
+                scores = scores.masked_fill(~active_mask, float('-inf'))
 
                 weights = torch.softmax(scores, dim=1)
                 weights = weights.unsqueeze(-1) # (batch, seq_len, 1)
