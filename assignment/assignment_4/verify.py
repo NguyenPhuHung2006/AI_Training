@@ -44,7 +44,7 @@ def check_for_empty_samples(file_path, key=None):
 # if len(train_fails) > 0:
 #     print(f"First 10 indices to fix: {train_fails[:10]}")
 
-fails = check_for_empty_samples("data/npz/compressed/data_64_augmented.npz", key="X_train")
+fails = check_for_empty_samples("data/npz_fixed/data_augmented.npz", key="X_train")
 
 if len(fails) > 0:
     print(f"First 10 indices to fix: {fails[:100]}")
