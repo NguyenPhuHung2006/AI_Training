@@ -78,8 +78,8 @@ def main():
 
     model = TextCNN(
         cost="cce",
-        lr=1e-3,
-        weight_decay=5e-4,
+        lr=5e-4, 
+        weight_decay=2e-4,
         pad_id=pad_id
     )
 
@@ -87,15 +87,16 @@ def main():
     model.set_embedding_matrix(embedding_matrix)
     model.embedding.weight.requires_grad = True
 
-    model.add_filter(out_channels=64, kernel_size=2, activation="relu", dropout=0.3)
-    model.add_filter(out_channels=64, kernel_size=3, activation="relu", dropout=0.3)
-    model.add_filter(out_channels=64, kernel_size=5, activation="relu", dropout=0.3)
-    model.add_pool("max", pool_dropout=0.5)
-    model.add_fc(n_units=128, activation="relu", dropout=0.5)
+    model.add_filter(out_channels=128, kernel_size=2, activation="relu", dropout=0.2)
+    model.add_filter(out_channels=128, kernel_size=3, activation="relu", dropout=0.2)
+    model.add_filter(out_channels=128, kernel_size=4, activation="relu", dropout=0.2)
+    model.add_filter(out_channels=128, kernel_size=5, activation="relu", dropout=0.2)
+    model.add_pool("max", pool_dropout=0.3)
+    model.add_fc(n_units=512, activation="relu", dropout=0.4)
     model.add_fc(n_units=n_classes)
     model.build()
 
-    model.set_scheduler("reduce_on_plateau", mode="min", factor=0.5, patience=2)
+    model.set_scheduler("reduce_on_plateau", mode="min", factor=0.2, patience=3)
 
     nn_data_path = "C:/STUDY/HK2_2/LAP_TRINH_4/ise/assignment/assignment_4/rnn/nn_data"
     os.makedirs(nn_data_path, exist_ok=True)
@@ -103,13 +104,14 @@ def main():
     i = 0
     while os.path.exists(f"{nn_data_path}/text_cnn_{i}.pth"):
         i += 1
+    model.load(f"{nn_data_path}/text_cnn_{i - 1}.pth")
 
     callbacks = [
-        EarlyStopping(patience=3),
+        EarlyStopping(patience=10),
         ModelCheckpoint(f"{nn_data_path}/text_cnn_{i}.pth")
     ]
 
-    model.fit(X_train, y_train, epochs=50, batch_size=32, callbacks=callbacks)
+    # model.fit(X_train, y_train, epochs=50, batch_size=64, callbacks=callbacks)
 
     y_pred_probs = model.predict(X_test)
     y_pred_ids = np.argmax(y_pred_probs, axis=1)
@@ -128,3 +130,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    print("completed")
