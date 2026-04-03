@@ -115,14 +115,21 @@ def main():
     y_pred = y_pred.flatten()
     
     df = pd.DataFrame({
-        "ID": np.arange(0, len(y_pred)),
+        "ID": df_test["ID"].tolist(),
         "Label": y_pred
     })
     
-    output_path = "outputs/nn"
+    df_temp = pd.DataFrame({
+        "ID": np.arange(0, 7000)
+    })
+    
+    df_final = df_temp.merge(df, on="ID", how="left")
+    df_final["Label"] = df_final["Label"].fillna(0).astype(int)
+    
+    output_path = "outputs"
     os.makedirs(output_path, exist_ok=True)
 
-    df.to_csv(f"{output_path}/rnn.csv", index=False)
+    df_final.to_csv(f"{output_path}/rnn.csv", index=False)
     
 
 if __name__ == "__main__":
